@@ -1,23 +1,20 @@
-FROM python:3.11-slim
+# docker/Dockerfile
+FROM python:3.12-slim
 
-ENV PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PREFECT_LOGGING_LEVEL=INFO
+# Set container timezone to Europe/London so any localtime ops match the schedule
+ENV TZ=Europe/London \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential git curl && \
-    rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends tzdata && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY pyproject.toml* setup.cfg* requirements.txt* ./
-RUN python -m pip install --upgrade pip && \
-    if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi && \
-    apt-get purge -y --auto-remove build-essential git && \
-    rm -rf /var/lib/apt/lists/*
+# Install deps
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r deploy_requirements.txt
 
-
+# Copy your project
 COPY . .
-RUN pip install -e .
 
-
+CMD ["python", "src/safe_roads/deploy/deploy.py"]

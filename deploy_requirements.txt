@@ -1,0 +1,9 @@
+python-dotenv
+pyyaml>=6,<7
+meteostat
+pandas>=2.2,<3
+numpy>=2,<3
+SQLAlchemy>=2,<3
+psycopg[binary]>=3.2,<4  
+sqlparse
+prefect=3.4

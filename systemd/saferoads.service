@@ -1,0 +1,19 @@
+[Unit]
+Description=SafeRoads hourly pipeline (containerized + Prefect Cloud)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ec2-user/SafeRoads
+
+# Load secrets and app env from a file that lives ONLY on the server
+EnvironmentFile=/etc/saferoads/saferoads.env
+
+# Prevent overlapping runs
+ExecStart=/usr/bin/flock -n /var/lock/saferoads.lock \
+  /usr/bin/docker run --rm \
+  --env-file /home/ec2-user/SafeRoads/.env \
+  -e PREFECT_API_URL=${PREFECT_API_URL} \
+  -e PREFECT_API_KEY=${PREFECT_API_KEY} \
+  amank/saferoads:latest

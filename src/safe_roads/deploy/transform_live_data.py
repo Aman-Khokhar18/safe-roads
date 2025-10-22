@@ -11,6 +11,9 @@ def transform_data():
 
     logger.info("Running SQL Queries")
     if _table_exists(url=url, table="osm_data_live_h3_enriched"):
-        _run_sql_file(clean_osm_enriched)
+        _run_sql_file(url, clean_osm_enriched)
     else:
         raise FileNotFoundError("osm_data_live_h3_enriched table not found in database")
+    
+if __name__ == "__main__":
+    transform_data()

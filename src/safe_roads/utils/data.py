@@ -3,9 +3,9 @@ import pandas as pd
 from pathlib import Path
 import sqlparse
 from dotenv import load_dotenv
+
 load_dotenv()
 
-# Moves Dataframe to PSQL 
 def df_to_pg(df: pd.DataFrame, table: str, db_url: str, if_exists: str | None = "replace", schema: str = "public"):
     engine = create_engine(db_url)
     df.to_sql(name=table, con=engine, schema=schema, if_exists=if_exists, index=False)
