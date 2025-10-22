@@ -1,3 +1,5 @@
+# docker-compose.deploy.yml
+
 services:
   prefect:
     image: prefecthq/prefect:3-latest
@@ -12,7 +14,6 @@ services:
       prefect server start --host 0.0.0.0 --port 4200
       "
     healthcheck:
-      # string form => CMD-SHELL; the entire heredoc is ONE string
       test: |
         python - <<'PY'
         import urllib.request, sys, socket
@@ -45,5 +46,10 @@ services:
       PREFECT_API_URL: http://prefect:4200/api
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - saferoads
 
-volumes: {}
+networks:
+  saferoads:
+    name: saferoads_default   # actual Docker network name (stable)
+    driver: bridge
