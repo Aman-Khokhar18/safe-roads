@@ -10,11 +10,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Leverage docker layer cache for deps
 COPY pyproject.toml* setup.cfg* requirements.txt* ./
 RUN python -m pip install --upgrade pip && \
-    if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi && \
+    apt-get purge -y --auto-remove build-essential git && \
+    rm -rf /var/lib/apt/lists/*
 
-# Copy project and install
+
 COPY . .
-RUN pip install -e . && pip install "prefect>=3,<4"
+RUN pip install -e .
+
+
