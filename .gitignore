@@ -1,6 +1,6 @@
 .mlflow_artifacts
 artifacts
-cahce
+cache
 catboost_info
 mlruns
 notebooks
