@@ -9,8 +9,11 @@ services:
       - "4200:4200"
     command: >
       prefect server start --host 0.0.0.0 --port 4200
-    volumes:
-      - prefect_data:/root/.prefect
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:4200/api >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
 
   prefect-worker:
     image: prefecthq/prefect:3-latest
@@ -19,6 +22,7 @@ services:
     environment:
       PREFECT_LOGGING_LEVEL: INFO
       PREFECT_API_URL: http://prefect:4200/api
+      PIP_ROOT_USER_ACTION: ignore  
       PGHOST: ${PGHOST}
       PGPORT: ${PGPORT}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -35,10 +39,14 @@ services:
     command: >
       bash -lc "
       pip install -q --no-cache-dir 'prefect-docker>=0.5.0' docker &&
-      (prefect work-pool ls | grep -q docker-safe-roads ||
-        prefect work-pool create -t docker docker-safe-roads) &&
+      # wait for the API (extra safety even with healthcheck)
+      until curl -sf http://prefect:4200/api >/dev/null; do
+        echo 'Waiting for Prefect API...'; sleep 2; 
+      done &&
+      # create the pool only if missing
+      (prefect work-pool inspect docker-safe-roads >/dev/null 2>&1) ||
+        prefect work-pool create -t docker docker-safe-roads &&
+      # start the docker worker
       prefect worker start --type docker --pool docker-safe-roads
       "
 
-volumes:
-  prefect_data: {}
