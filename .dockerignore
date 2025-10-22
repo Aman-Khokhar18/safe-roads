@@ -12,6 +12,7 @@ dist/
 .venv/
 venv/
 env/
+keys
 
 # VCS / OS junk
 .git
