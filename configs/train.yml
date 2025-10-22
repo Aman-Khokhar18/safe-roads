@@ -1,0 +1,35 @@
+EXPERIMENT_NAME: "safe-roads"
+RANDOM_STATE: 42
+EARLY_STOPPING_ROUNDS: 50
+
+CATEGORICAL: [
+    "h3","neighbor_1","neighbor_2","neighbor_3","neighbor_4","neighbor_5","neighbor_6",
+    "parent_h3","name","highway","surface","oneway","junction",
+    "traffic_signals","traffic_calming","crossing","sidewalk","cycleway","bicycle","lit",
+    "access","vehicle","hgv","psv","bus","overtaking","bridge","tunnel","layer","incline",
+    "barrier","amenity","road_class3","borough", 
+]
+
+NUMERICAL: [
+    "width","smoothness","lanes","temp","dwpt","rhum","prcp","snow","wdir","wspd","wpgt",
+    "pres","tsun","coco","day","hour","is_weekend", "hour_sin", "hour_cos", "dow_sin",
+    "dow_cos", "dom_sin", "dom_cos", "month_sin", "month_cos", traffic_light_count, crossing_count,
+    motorway_other_count, cycleway_count
+]
+
+BOOLEAN: ["is_junction", "is_turn"]
+
+MODEL_NAME: "saferoads_prod"
+MLFLOW_TRACKING_URI: "http://localhost:5000"
+REGISTER_AFTER_TRAIN: True
+REGISTRY_STAGE: "production"  
+REGISTRY_ALIAS: "latest"
+
+SENTINEL: "__MISSING__"
+
+TARGET: "collision"
+POS_LABEL: 1
+NEG_LABEL: 0
+
+TEST_SIZE: 0.2
+VAL_SIZE: 0.2

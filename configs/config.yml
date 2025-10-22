@@ -1,0 +1,20 @@
+
+#TFL Collision Data URLs
+BASE_COLLISION_DATA_URL: "https://tfl.gov.uk/cdn/static/cms/documents/"
+COLLISION_DATA_URL_FILL: "-gla-data-extract-"
+COLLISION_DATA_EXTENSION: ".csv"
+TIMEOUT: 60
+
+#TFL Collision Data years
+START_DATE: '01-01-2015'  # DD-MM-YYYY
+END_DATE: '31-12-2024'    # DD-MM-YYYY
+
+#TFL Collision Data storage
+COLLISION_DATA_OUTDIR: "data/raw/collision_data"
+COLLISION_DATA_TYPES: ["attendant"]
+
+#Weather Station IDs
+# WEATHER_STATION_CORDS: [[51.4833,-0.4500], [51.1500,-0.1833], [51.8833,0.2333]] 
+WEATHER_TIMEZONE: 'Europe/London'
+
+LONDON_BOROUGH_URL: "https://gis2.london.gov.uk/server/rest/services/apps/Layers/MapServer/3/query?where=1%3D1&outFields=*&outSR=4326&f=geojson"

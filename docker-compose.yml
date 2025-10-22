@@ -1,0 +1,66 @@
+services:
+  saferoads:
+    build: 
+      context: .
+      dockerfile: docker/postgres_h3.dockerfile
+    container_name: saferoads
+    restart: always
+    env_file: .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - data:/var/lib/postgresql/data
+      - ./data/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+
+  mlflow:
+    build:
+      context: .
+      dockerfile: ./docker/mlflow-postgres.dockerfile
+    container_name: mlflow
+    depends_on:
+      saferoads:
+        condition: service_healthy
+    restart: unless-stopped
+    ports:
+      - "${MLFLOW_HOST_PORT:-5000}:5000"
+    volumes:
+      - mlruns:/mlruns
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@saferoads:5432/${POSTGRES_DB}
+      --artifacts-destination /mlruns
+      --serve-artifacts
+
+  prefect:
+    image: prefecthq/prefect:3-latest
+    container_name: prefect
+    restart: unless-stopped
+    environment:
+      PREFECT_API_URL: "http://localhost:4200/api"
+    ports:
+      - "4200:4200"
+    command: >
+      prefect server start --host 0.0.0.0 --port 4200
+    volumes:
+      - prefect_data:/root/.prefect
+    depends_on:
+      saferoads:
+        condition: service_healthy
+
+volumes:
+  data: {}
+  mlruns: {}
+  prefect_data: {}

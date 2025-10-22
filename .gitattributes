@@ -1,0 +1,4 @@
+* text=auto
+# ensure these are committed as LF
+*.py  text eol=lf
+*.sql text eol=lf
