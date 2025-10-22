@@ -1,7 +1,7 @@
 from datetime import datetime, timezone, timedelta
 import pandas as pd
 from meteostat import Hourly, Point
-from prefect import task, flow, get_run_logger
+from prefect import task, get_run_logger
 
 from safe_roads.utils.config import get_pg_url
 from safe_roads.utils.data import df_to_pg
@@ -51,7 +51,7 @@ def write_to_postgis(df: pd.DataFrame, db_url: str, table_name: str = TABLE_NAME
     log.info(f"Loaded {len(df)} rows into {table_name} (if_exists='{if_exists}').")
 
 
-@flow(name="Get Current Hourly Weather for Greater London (Point → PostGIS)")
+@task(name="Get Current Hourly Weather for Greater London (Point → PostGIS)")
 def get_hourly_weather():
     log = get_run_logger()
     log.info("Starting current hourly weather ingestion for Greater London")
