@@ -1,8 +1,9 @@
+# safe_roads/deploy/deploy.py
 import os
 from dotenv import load_dotenv
 from prefect import flow
-from prefect.client.schemas.schedules import CronSchedule           
-from prefect.docker import DockerImage             
+from prefect.schedules import CronSchedule               # <- Prefect 3 import
+from prefect.filesystems import GitRepository            # <- storage
 
 from safe_roads.deploy.fetch_weather_hourly import get_hourly_weather
 from safe_roads.deploy.predict import predict
@@ -30,19 +31,21 @@ if __name__ == "__main__":
         "HF_MODEL_FILE": os.getenv("HF_MODEL_FILE"),
     }
 
-
-    image = DockerImage(
-        name="amank/saferoads:latest",
-        build=False,            
-        push=False,             
+    # If the repo is private, either create a Prefect Git block with credentials
+    # and use GitRepository.load("your-block"), or embed a tokenized URL.
+    storage = GitRepository(
+        url="https://github.com/<you>/<repo>.git",
+        branch="main",
+        # path="src",  # set if your code lives in a subdir
     )
 
     hourly_pipeline.deploy(
         name="hourly-eu-london",
         work_pool_name="docker-safe-roads",
-        image=image,  
+        storage=storage,   # <-- this satisfies Prefect; no image build
         schedule=CronSchedule(cron="0 * * * *", timezone="Europe/London"),
         job_variables={
-            "env": RUN_ENV,   
+            "image": "amank/saferoads:latest",  # prebuilt image the worker will run
+            "env": RUN_ENV,
         },
     )
