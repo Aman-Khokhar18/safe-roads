@@ -40,6 +40,6 @@ if __name__ == "__main__":
         job_variables={
             "env": RUN_ENV,
             "networks": ["saferoads_default"],
-            "image_pull_policy": "IF_NOT_PRESENT",  
+            "image_pull_policy": "if_not_present",  
         },
     )
