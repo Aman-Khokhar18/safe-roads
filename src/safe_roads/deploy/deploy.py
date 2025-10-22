@@ -33,11 +33,13 @@ if __name__ == "__main__":
     hourly_pipeline.deploy(
         name="hourly-eu-london",
         work_pool_name="docker-safe-roads",
-        # use your prebuilt image; don't build or push anything
         image="amank/saferoads:latest",
         build=False,
         push=False,
         schedule=CronSchedule(cron="0 * * * *", timezone="Europe/London"),
-        # pass env via job variables
-        job_variables={"env": RUN_ENV},
+        job_variables={
+            "env": RUN_ENV,
+            "networks": ["saferoads_default"],
+            "image_pull_policy": "IF_NOT_PRESENT",  
+        },
     )

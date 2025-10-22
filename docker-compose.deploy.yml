@@ -34,9 +34,10 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     command: >
       bash -lc "
-      (prefect work-pool ls | grep -q docker-safe-roads) ||
-      prefect work-pool create -t docker docker-safe-roads;
-      prefect worker start -p docker-safe-roads
+      pip install -q --no-cache-dir 'prefect-docker>=0.5.0' docker &&
+      (prefect work-pool ls | grep -q docker-safe-roads ||
+        prefect work-pool create -t docker docker-safe-roads) &&
+      prefect worker start --type docker --pool docker-safe-roads
       "
 
 volumes:
