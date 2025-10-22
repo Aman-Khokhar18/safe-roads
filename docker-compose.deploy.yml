@@ -27,8 +27,14 @@ services:
       timeout: 3s
       retries: 60
       start_period: 20s
+    networks:
+      default:
+        name: saferoads_default
 
   prefect-worker:
+    build:
+      context: .
+      dockerfile: worker.dockerfile
     image: saferoads/prefect-docker-worker:latest
     container_name: prefect-worker
     restart: unless-stopped
