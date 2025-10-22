@@ -62,7 +62,7 @@ def predict():
 
     sess = requests.Session()
 
-    url = "postgresql+psycopg://amank:london_123@saferoads.cg5mscywwjft.us-east-1.rds.amazonaws.com:5432/saferoads?sslmode=require"
+    url = get_pg_url()
 
     engine = create_engine(url=url, pool_pre_ping=True)
     dtype_map = {

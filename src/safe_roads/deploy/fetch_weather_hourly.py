@@ -56,7 +56,7 @@ def get_hourly_weather():
     log = get_run_logger()
     log.info("Starting current hourly weather ingestion for Greater London")
 
-    db_url = "postgresql+psycopg://amank:london_123@safefroads.cg5mscywwjft.us-east-1.rds.amazonaws.com:5432/saferoads?sslmode=require"
+    db_url = get_pg_url()
 
     df = fetch_hourly_weather(LAT, LON)
     write_to_postgis(df, db_url, table_name=TABLE_NAME, if_exists="replace")

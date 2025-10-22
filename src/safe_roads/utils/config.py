@@ -41,7 +41,8 @@ def get_pg_url():
     db   = os.getenv("POSTGRES_DB")
     host = os.getenv("PGHOST", "localhost")
     port = os.getenv("POSTGRES_PORT", "5432")
-    return f"postgresql://{user}:{quote_plus(pwd)}@{host}:{port}/{db}"
+    sslmode = os.getenv("POSTGRES_SSLMODE, require")
+    return f"postgresql://{user}:{quote_plus(pwd)}@{host}:{port}/{db}?sslmode={sslmode}"
 
 
 def year_month(date_str: str) -> tuple[int, int]:
