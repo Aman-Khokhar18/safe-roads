@@ -8,7 +8,9 @@ services:
     ports:
       - "4200:4200"
     command: >
+      bash -lc "
       prefect server start --host 0.0.0.0 --port 4200
+      "
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:4200/api >/dev/null"]
       interval: 5s
@@ -16,37 +18,24 @@ services:
       retries: 40
 
   prefect-worker:
-    image: prefecthq/prefect:3-latest
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    image: saferoads/prefect-docker-worker:latest
     container_name: prefect-worker
     restart: unless-stopped
+    depends_on:
+      prefect:
+        condition: service_healthy
     environment:
       PREFECT_LOGGING_LEVEL: INFO
       PREFECT_API_URL: http://prefect:4200/api
-      PIP_ROOT_USER_ACTION: ignore  
-      PGHOST: ${PGHOST}
-      PGPORT: ${PGPORT}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_SSLMODE: ${POSTGRES_SSLMODE}
-      HUGGINGFACE_HUB_TOKEN: ${HUGGINGFACE_HUB_TOKEN}
-      HF_MODEL_REPO: ${HF_MODEL_REPO}
-      HF_MODEL_FILE: ${HF_MODEL_FILE}
-    depends_on:
-      - prefect
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-    command: >
-      bash -lc "
-      pip install -q --no-cache-dir 'prefect-docker>=0.5.0' docker &&
-      # wait for the API (extra safety even with healthcheck)
-      until curl -sf http://prefect:4200/api >/dev/null; do
-        echo 'Waiting for Prefect API...'; sleep 2; 
-      done &&
-      # create the pool only if missing
-      (prefect work-pool inspect docker-safe-roads >/dev/null 2>&1) ||
-        prefect work-pool create -t docker docker-safe-roads &&
-      # start the docker worker
-      prefect worker start --type docker --pool docker-safe-roads
-      "
 
+# If you run Postgres in compose, add a service here (optional).
+# Otherwise, ensure PGHOST points to a reachable hostname/IP on this host.
+
+# Project volume (server state)
+volumes:
+  prefect_data: {}
