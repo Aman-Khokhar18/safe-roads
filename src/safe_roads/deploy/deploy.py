@@ -32,6 +32,7 @@ if __name__ == "__main__":
     hourly_pipeline.deploy(
         name="hourly-eu-london",
         work_pool_name="docker-safe-roads",
+        image="amank/saferoads:latest",
         schedule=CronSchedule(cron="0 * * * *", timezone="Europe/London"),
         job_variables={
             "image": "amank/saferoads:latest",
