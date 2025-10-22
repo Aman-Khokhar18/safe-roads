@@ -28,8 +28,7 @@ services:
       retries: 60
       start_period: 20s
     networks:
-      default:
-        name: saferoads_default
+      - saferoads
 
   prefect-worker:
     build:
