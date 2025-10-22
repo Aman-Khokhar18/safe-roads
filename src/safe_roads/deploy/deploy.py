@@ -1,3 +1,4 @@
+# deploy_safe_roads.py
 import os
 from dotenv import load_dotenv
 from prefect import flow
@@ -7,6 +8,7 @@ from safe_roads.deploy.fetch_weather_hourly import get_hourly_weather
 from safe_roads.deploy.predict import predict
 from safe_roads.deploy.transform_live_data import transform_data
 
+# Load .env from repo root (adjust path if needed)
 load_dotenv()
 
 @flow(name="safe-roads-hourly-pipeline")
@@ -29,13 +31,12 @@ if __name__ == "__main__":
         "HF_MODEL_FILE": os.getenv("HF_MODEL_FILE"),
     }
 
+
     hourly_pipeline.deploy(
         name="hourly-eu-london",
         work_pool_name="docker-safe-roads",
-        image="amank/saferoads:latest",
         schedule=CronSchedule(cron="0 * * * *", timezone="Europe/London"),
-        job_variables={
-            "image": "amank/saferoads:latest",
-            "env": RUN_ENV,
-        },
+        image="amank/saferoads:latest",
+        push=False,  
+        job_variables={"env": RUN_ENV},
     )
