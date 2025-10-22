@@ -18,9 +18,6 @@ services:
       retries: 40
 
   prefect-worker:
-    build:
-      context: .
-      dockerfile: worker.dockerfile
     image: saferoads/prefect-docker-worker:latest
     container_name: prefect-worker
     restart: unless-stopped
@@ -33,9 +30,4 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
 
-# If you run Postgres in compose, add a service here (optional).
-# Otherwise, ensure PGHOST points to a reachable hostname/IP on this host.
-
-# Project volume (server state)
-volumes:
-  prefect_data: {}
+volumes: {}
