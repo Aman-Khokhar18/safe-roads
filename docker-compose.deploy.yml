@@ -20,7 +20,7 @@ services:
   prefect-worker:
     build:
       context: .
-      dockerfile: Dockerfile.worker
+      dockerfile: worker.dockerfile
     image: saferoads/prefect-docker-worker:latest
     container_name: prefect-worker
     restart: unless-stopped
