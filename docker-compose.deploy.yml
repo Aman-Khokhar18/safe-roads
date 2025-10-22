@@ -12,10 +12,21 @@ services:
       prefect server start --host 0.0.0.0 --port 4200
       "
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:4200/api >/dev/null"]
+      # string form => CMD-SHELL; the entire heredoc is ONE string
+      test: |
+        python - <<'PY'
+        import urllib.request, sys, socket
+        socket.setdefaulttimeout(2)
+        try:
+            urllib.request.urlopen('http://localhost:4200/api', timeout=2)
+            sys.exit(0)
+        except Exception:
+            sys.exit(1)
+        PY
       interval: 5s
       timeout: 3s
-      retries: 40
+      retries: 60
+      start_period: 20s
 
   prefect-worker:
     image: saferoads/prefect-docker-worker:latest
