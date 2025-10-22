@@ -1,0 +1,32 @@
+# Python / build
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+build/
+dist/
+
+# Envs & secrets
+.env
+.venv/
+venv/
+env/
+
+# VCS / OS junk
+.git
+.gitignore
+.DS_Store
+Thumbs.db
+
+# Data / outputs
+data/
+datasets/
+outputs/
+runs/
+mlruns/
+checkpoints/
+
+# Notebooks/temp
+.ipynb_checkpoints/
+*.log

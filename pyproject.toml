@@ -6,12 +6,11 @@ build-backend = "setuptools.build_meta"
 name = "saferoads"
 version = "0.1.0"
 dependencies = [
-  # Core utilities
   "requests",
   "PyYAML",
   "prefect>=3",
   "mlflow",
-  "xgboost",
+  "catboost",
   "pandas",
   "numpy",
   "scikit-learn",

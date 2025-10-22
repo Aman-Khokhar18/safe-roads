@@ -1,0 +1,43 @@
+services:
+  prefect:
+    image: prefecthq/prefect:3-latest
+    container_name: prefect
+    restart: unless-stopped
+    environment:
+      PREFECT_LOGGING_LEVEL: INFO
+    ports:
+      - "4200:4200"
+    command: >
+      prefect server start --host 0.0.0.0 --port 4200
+    volumes:
+      - prefect_data:/root/.prefect
+
+  prefect-worker:
+    image: prefecthq/prefect:3-latest
+    container_name: prefect-worker
+    restart: unless-stopped
+    environment:
+      PREFECT_LOGGING_LEVEL: INFO
+      PREFECT_API_URL: http://prefect:4200/api
+      PGHOST: ${PGHOST}
+      PGPORT: ${PGPORT}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_SSLMODE: ${POSTGRES_SSLMODE}
+      HUGGINGFACE_HUB_TOKEN: ${HUGGINGFACE_HUB_TOKEN}
+      HF_MODEL_REPO: ${HF_MODEL_REPO}
+      HF_MODEL_FILE: ${HF_MODEL_FILE}
+    depends_on:
+      - prefect
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: >
+      bash -lc "
+      (prefect work-pool ls | grep -q docker-safe-roads) ||
+      prefect work-pool create -t docker docker-safe-roads;
+      prefect worker start -p docker-safe-roads
+      "
+
+volumes:
+  prefect_data: {}
