@@ -12,7 +12,7 @@ WORKDIR /app
 
 # Install deps
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r deploy_requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy your project
 COPY . .
