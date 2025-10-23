@@ -7,6 +7,16 @@ __pycache__/
 build/
 dist/
 
+.mlflow_artifacts
+artifacts
+cache
+catboost_info
+mlruns
+notebooks
+ohsome_log
+outputs
+*.egg-info/
+
 # Envs & secrets
 .env
 .venv/
