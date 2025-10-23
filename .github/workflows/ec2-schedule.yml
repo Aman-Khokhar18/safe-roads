@@ -1,0 +1,76 @@
+name: Run GHCR image on EC2 (4h)
+
+on:
+  schedule:
+    - cron: "0 */4 * * *"   # every 4 hours (UTC)
+  workflow_dispatch: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write       # for OIDC role assumption
+      contents: read
+
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+      EC2_USER: ${{ secrets.EC2_USER }}
+      CONTAINER_IMAGE: ${{ secrets.CONTAINER_IMAGE }}
+      CONTAINER_NAME: my-python-job
+
+    steps:
+      - name: Configure AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Ensure EC2 is running + get host
+        id: ec2
+        run: |
+          set -e
+          STATE=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query 'Reservations[0].Instances[0].State.Name' --output text)
+          if [ "$STATE" != "running" ]; then
+            aws ec2 start-instances --instance-ids "$INSTANCE_ID" >/dev/null
+            aws ec2 wait instance-status-ok --instance-ids "$INSTANCE_ID"
+          fi
+          HOST=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query 'Reservations[0].Instances[0].PublicDnsName' --output text)
+          if [ -z "$HOST" ] || [ "$HOST" = "None" ]; then
+            HOST=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+          fi
+          echo "host=$HOST" >> "$GITHUB_OUTPUT"
+
+      - name: Add SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+      - name: Pull & run on EC2
+        env:
+          EC2_HOST: ${{ steps.ec2.outputs.host }}
+        run: |
+          set -e
+          REMOTE_SCRIPT=$(cat <<'EOF'
+          set -e
+          # Install Docker if missing (Ubuntu/Amazon Linux)
+          if ! command -v docker >/dev/null 2>&1; then
+            if command -v apt-get >/dev/null 2>&1; then
+              sudo apt-get update -y && sudo apt-get install -y docker.io
+              sudo systemctl enable --now docker
+            else
+              sudo yum update -y
+              sudo amazon-linux-extras install -y docker || sudo yum install -y docker
+              sudo systemctl enable --now docker
+            fi
+          fi
+
+          # Clean previous run, pull and run
+          docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+          docker pull "${CONTAINER_IMAGE}"
+          docker run --rm --name "${CONTAINER_NAME}" "${CONTAINER_IMAGE}"
+          EOF
+          )
+          ssh -o StrictHostKeyChecking=no "$EC2_USER@${EC2_HOST}" \
+            "export CONTAINER_IMAGE='${CONTAINER_IMAGE}' CONTAINER_NAME='${CONTAINER_NAME}'; bash -s" \
+            <<< "$REMOTE_SCRIPT"
