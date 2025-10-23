@@ -1,0 +1,94 @@
+name: Build & Push Docker Image to GHCR
+
+on:
+  push:
+    branches: [ main ]     # build+push on main commits
+  pull_request:            # PRs will only build (no push)
+  workflow_dispatch:       # manual run; optional extra tag
+    inputs:
+      tag:
+        description: "Extra image tag (e.g. v1.2.3). Leave blank to skip."
+        required: false
+        default: ""
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+
+    # Needed to push to GHCR with GITHUB_TOKEN
+    permissions:
+      contents: read
+      packages: write
+
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}        # <owner>/<repo>
+      SHA_TAG: ${{ github.sha }}
+      EXTRA_TAG: ${{ github.event.inputs.tag }}
+
+    concurrency:
+      group: ghcr-${{ github.ref_name }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # PRs: build only (no push), to verify Dockerfile builds and warm cache
+      - name: Build (no push) for PRs
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Main branch / manual: login + push
+      - name: Log in to GHCR
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare tags
+        if: ${{ github.event_name != 'pull_request' }}
+        id: meta
+        run: |
+          set -e
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          TAGS="${IMAGE}:latest
+          ${IMAGE}:${{ env.SHA_TAG }}"
+          if [ -n "${{ env.EXTRA_TAG }}" ]; then
+            TAGS="${TAGS}
+          ${IMAGE}:${{ env.EXTRA_TAG }}"
+          fi
+          printf '%s\n' "tags<<EOF" "$TAGS" "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Build & Push
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Show pushed image refs
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          echo "Pushed:"
+          echo " - ${IMAGE}:latest"
+          echo " - ${IMAGE}:${{ env.SHA_TAG }}"
+          if [ -n "${{ env.EXTRA_TAG }}" ]; then
+            echo " - ${IMAGE}:${{ env.EXTRA_TAG }}"
+          fi
