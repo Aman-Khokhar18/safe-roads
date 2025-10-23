@@ -20,21 +20,13 @@ jobs:
       packages: write
 
     env:
-      REGISTRY: ghcr.io
-      IMAGE_NAME: ${{ toLower(github.repository) }}  # <owner>/<repo>, forced lowercase
+      IMAGE: ghcr.io/aman-khokhar18/safe-roads   # hardcoded, all lowercase
       SHA_TAG: ${{ github.sha }}
       EXTRA_TAG: ${{ github.event.inputs.tag }}
 
-    concurrency:
-      group: ghcr-${{ github.ref_name }}
-      cancel-in-progress: false
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
 
       # PRs: build only (no push)
       - name: Build (no push) for PRs
@@ -55,31 +47,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Prepare tags (lowercase + sanitize)
-        if: ${{ github.event_name != 'pull_request' }}
-        id: meta
-        run: |
-          set -euo pipefail
-          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-
-          # sanitize/normalize optional EXTRA_TAG for Docker (lowercase, no spaces/slashes)
-          EXTRA="${EXTRA_TAG:-}"
-          if [ -n "$EXTRA" ]; then
-            EXTRA="$(printf '%s' "$EXTRA" | tr '[:upper:]' '[:lower:]')"
-            EXTRA="${EXTRA// /-}"
-            EXTRA="${EXTRA//\//-}"
-          fi
-
-          {
-            echo "tags<<EOF"
-            echo "${IMAGE}:latest"
-            echo "${IMAGE}:${{ env.SHA_TAG }}"
-            if [ -n "$EXTRA" ]; then
-              echo "${IMAGE}:${EXTRA}"
-            fi
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
       - name: Build & Push
         if: ${{ github.event_name != 'pull_request' }}
         uses: docker/build-push-action@v6
@@ -87,17 +54,19 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ env.SHA_TAG }}
+            ${{ env.IMAGE }}:${{ github.event.inputs.tag && join(fromJSON('["' + toJSON(github.event.inputs.tag) + '"]'), '') || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Show pushed image refs
         if: ${{ github.event_name != 'pull_request' }}
         run: |
-          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
           echo "Pushed:"
           echo " - ${IMAGE}:latest"
-          echo " - ${IMAGE}:${{ env.SHA_TAG }}"
-          if [ -n "${{ steps.meta.outputs.tags }}" ] && grep -q ":${{ github.event.inputs.tag || '' }}" <<< "${{ steps.meta.outputs.tags }}"; then
-            echo " - ${IMAGE}:$(echo '${{ github.event.inputs.tag }}' | tr '[:upper:]' '[:lower:]')"
+          echo " - ${IMAGE}:${SHA_TAG}"
+          if [ -n "${EXTRA_TAG}" ]; then
+            echo " - ${IMAGE}:${EXTRA_TAG}"
           fi
