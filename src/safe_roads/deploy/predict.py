@@ -2,15 +2,22 @@ import math
 import numpy as np
 import pandas as pd
 import requests
-
+import logging
 import gc
+
 from sqlalchemy import create_engine
 from sqlalchemy.dialects.postgresql import VARCHAR, INTEGER, DOUBLE_PRECISION
-from prefect import task, get_run_logger
 
 from safe_roads.utils.mlutil import data_loader
 from safe_roads.utils.config import load_config, get_pg_url
 
+
+logger = logging.getLogger("safe_roads.predict")
+if not logger.handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(name)s - %(message)s",
+    )
 
 
 def _scrub_jsonable(obj):
@@ -37,27 +44,25 @@ def _scrub_jsonable(obj):
     return obj
 
 
-@task
 def predict():
-    logger = get_run_logger()
     config      = load_config("configs/app.yml")
     table_name  = config['INPUT_TABLE']
     model_api   = config['SAFE_ROADS_API']
-    endpoint    = model_api + "/predict"
+    endpoint    = model_api.rstrip("/") + "/predict"
     batch_size  = int(config['BATCH_SIZE'])
     timeout     = config['HTTP_TIMEOUT']
 
-    # new (optional) knobs; add to config if you like
-    read_chunksize  = int(config.get('READ_CHUNKSIZE', 10_000))  # rows pulled from SQL at a time
-    write_chunksize = int(config.get('WRITE_CHUNKSIZE', 10_000))  # rows per INSERT batch in to_sql
+    # optional tunables
+    read_chunksize  = int(config.get('READ_CHUNKSIZE', 10_000))
+    write_chunksize = int(config.get('WRITE_CHUNKSIZE', 10_000))
 
     OUT_TABLE  = config["OUT_TABLE"]
     IF_EXISTS0 = "replace"
 
-    logger.info(f"Streaming data from table: {table_name} (read_chunksize={read_chunksize})")
+    logger.info("Streaming data from table: %s (read_chunksize=%s)", table_name, read_chunksize)
     df_iter = data_loader(table_name, chunksize=read_chunksize)
 
-    # In case someone sets chunksize=None by mistake, normalize to an iterable
+    # Normalize to iterable if a full DataFrame is returned
     if isinstance(df_iter, pd.DataFrame):
         df_iter = [df_iter]
 
@@ -73,7 +78,6 @@ def predict():
 
     first_write = True
     total_rows  = 0
-    chunk_idx   = 0
 
     for chunk_idx, chunk_df in enumerate(df_iter, start=1):
         if chunk_df is None or chunk_df.empty:
@@ -87,7 +91,7 @@ def predict():
         # Clean infinities/NaNs early
         chunk_df.replace([np.inf, -np.inf], pd.NA, inplace=True)
 
-        logger.info(f"SQL chunk {chunk_idx}: {len(chunk_df)} rows")
+        logger.info("SQL chunk %d: %d rows", chunk_idx, len(chunk_df))
 
         # Batch within the chunk for the model API
         num_batches_in_chunk = math.ceil(len(chunk_df) / batch_size)
@@ -135,7 +139,10 @@ def predict():
             first_write = False
 
             total_rows += len(out_df)
-            logger.info(f"Chunk {chunk_idx} batch {b+1}/{num_batches_in_chunk}: wrote {len(out_df)} rows (total {total_rows})")
+            logger.info(
+                "Chunk %d batch %d/%d: wrote %d rows (total %d)",
+                chunk_idx, b + 1, num_batches_in_chunk, len(out_df), total_rows
+            )
 
             # Free memory
             del out_df, batch_df, batch_records, preds, probs, out
@@ -144,7 +151,7 @@ def predict():
     if total_rows == 0:
         raise RuntimeError(f"No rows returned by data_loader('{table_name}')")
 
-    logger.info(f"Done. Wrote {total_rows} rows to {OUT_TABLE}.")
+    logger.info("Done. Wrote %d rows to %s.", total_rows, OUT_TABLE)
     print(f"Done. Wrote {total_rows} rows to {OUT_TABLE}.")
 
 

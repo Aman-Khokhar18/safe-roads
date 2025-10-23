@@ -1,10 +1,17 @@
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
+import logging
 import pandas as pd
 from meteostat import Hourly, Point
-from prefect import task, get_run_logger
 
 from safe_roads.utils.config import get_pg_url
 from safe_roads.utils.data import df_to_pg
+
+logger = logging.getLogger("safe_roads.weather")
+if not logger.handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(name)s - %(message)s",
+    )
 
 LAT = 51.5074
 LON = -0.1278
@@ -12,22 +19,26 @@ TIMEZONE = "Europe/London"
 TABLE_NAME = "weather_live"
 
 
-@task(retries=3, retry_delay_seconds=10)
 def fetch_hourly_weather(lat: float, lon: float, area_label: str = "Greater London") -> pd.DataFrame:
-    log = get_run_logger()
+    """Fetch latest hourly record from Meteostat for a point."""
     loc = Point(lat, lon)
 
-    end_utc   = datetime.utcnow()                       
-    start_utc = end_utc - timedelta(hours=2)            
+    end_utc = datetime.utcnow()
+    start_utc = end_utc - timedelta(hours=2)
 
-    log.info(
-        f"Fetching Meteostat Hourly for {area_label} ({lat:.4f}, {lon:.4f}) "
-        f"{start_utc.isoformat()} → {end_utc.isoformat()} (timezone='Europe/London')"
+    logger.info(
+        "Fetching Meteostat Hourly for %s (%.4f, %.4f) %s → %s (timezone='%s')",
+        area_label, lat, lon, start_utc.isoformat(), end_utc.isoformat(), TIMEZONE
     )
 
-    df = Hourly(loc, start_utc, end_utc, timezone="Europe/London").fetch()
+    try:
+        df = Hourly(loc, start_utc, end_utc, timezone=TIMEZONE).fetch()
+    except Exception as e:
+        logger.exception("Meteostat fetch failed: %s", e)
+        return pd.DataFrame()
+
     if df is None or df.empty:
-        log.warning("No data returned from Meteostat.")
+        logger.warning("No data returned from Meteostat.")
         return pd.DataFrame()
 
     # Keep only the most recent hour
@@ -37,31 +48,32 @@ def fetch_hourly_weather(lat: float, lon: float, area_label: str = "Greater Lond
     df["area"] = area_label
     df["retrieved_at_utc"] = pd.Timestamp.utcnow()
 
-    log.info("Fetched latest hourly record")
+    logger.info("Fetched latest hourly record")
     return df
 
 
-@task
-def write_to_postgis(df: pd.DataFrame, db_url: str, table_name: str = TABLE_NAME, if_exists: str = "replace"):
-    log = get_run_logger()
+def write_to_postgis(df: pd.DataFrame, db_url: str, table_name: str = TABLE_NAME, if_exists: str = "replace") -> None:
+    """Write dataframe to PostGIS."""
     if df is None or df.empty:
-        log.warning("No data to load; skipping write.")
+        logger.warning("No data to load; skipping write.")
         return
-    df_to_pg(df, table_name, db_url, if_exists=if_exists)
-    log.info(f"Loaded {len(df)} rows into {table_name} (if_exists='{if_exists}').")
+
+    try:
+        df_to_pg(df, table_name, db_url, if_exists=if_exists)
+        logger.info("Loaded %d rows into %s (if_exists='%s').", len(df), table_name, if_exists)
+    except Exception as e:
+        logger.exception("Failed to write to PostGIS: %s", e)
 
 
-@task(name="Get Current Hourly Weather for Greater London (Point → PostGIS)")
-def get_hourly_weather():
-    log = get_run_logger()
-    log.info("Starting current hourly weather ingestion for Greater London")
+def get_hourly_weather() -> None:
+    """End-to-end: fetch and write the latest hourly weather for Greater London."""
+    logger.info("Starting current hourly weather ingestion for Greater London")
 
     db_url = get_pg_url()
-
     df = fetch_hourly_weather(LAT, LON)
     write_to_postgis(df, db_url, table_name=TABLE_NAME, if_exists="replace")
 
-    log.info("Weather ingestion complete")
+    logger.info("Weather ingestion complete")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-# Base: AWS Lambda Python 3.11 (fine to run on EC2 too)
+# Base: AWS Lambda Python 3.11 (also fine to run on EC2/containers)
 FROM public.ecr.aws/lambda/python:3.11
 
 # Timezone
@@ -7,20 +7,19 @@ RUN yum install -y tzdata && \
     ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ >/etc/timezone && \
     yum clean all
 
-
-ENV HOME=/tmp XDG_CACHE_HOME=/tmp TMPDIR=/tmp TMP=/tmp TEMP=/tmp \
-    PREFECT_HOME=/tmp/prefect JOBLIB_TEMP_FOLDER=/tmp/joblib \
-    METEOSTAT_CACHE_DIR=/tmp/meteostat MPLCONFIGDIR=/tmp/mpl \
-    PREFECT_API_ENABLE_EPHEMERAL_SERVER=false \
-    PREFECT_LOGGING_TO_API_ENABLED=true \
-    PREFECT_RESULTS_PERSIST_BY_DEFAULT=false
-
+# Runtime/cache dirs on Lambda's writable /tmp
+ENV HOME=/tmp \
+    XDG_CACHE_HOME=/tmp \
+    TMPDIR=/tmp TMP=/tmp TEMP=/tmp \
+    METEOSTAT_CACHE_DIR=/tmp/meteostat \
+    MPLCONFIGDIR=/tmp/mpl \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 WORKDIR ${LAMBDA_TASK_ROOT}
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt --target "${LAMBDA_TASK_ROOT}"
-
 
 COPY . ${LAMBDA_TASK_ROOT}
 

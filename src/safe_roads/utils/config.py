@@ -36,13 +36,8 @@ def load_config(path: str | Path | None = None):
     return config
 
 def get_pg_url():
-    user = os.getenv("POSTGRES_USER")
-    pwd  = os.getenv("POSTGRES_PASSWORD")
-    db   = os.getenv("POSTGRES_DB")
-    host = os.getenv("PGHOST", "localhost")
-    port = os.getenv("POSTGRES_PORT", "5432")
-    sslmode = "require"
-    return f"postgresql+psycopg://{user}:{quote_plus(pwd)}@{host}:{port}/{db}?sslmode={sslmode}"
+    url = os.getenv("DATABASE_URL")
+    return url
 
 
 def year_month(date_str: str) -> tuple[int, int]:

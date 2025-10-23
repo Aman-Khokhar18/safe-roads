@@ -50,24 +50,34 @@ jobs:
           sed -i 's/\r$//' key.pem
           chmod 600 key.pem
 
+      # Build a minimal .env (runner only)
+      - name: Build .env
+        shell: bash
+        run: |
+          umask 077
+          cat > app.env <<'EOF'
+          DATABASE_URL=${{ secrets.DATABASE_URL }}
+          SAFE_ROADS_API=${{ secrets.SAFE_ROADS_API }}
+          HTTP_TIMEOUT=30
+          EOF
+
+      # Copy .env to EC2
+      - name: Copy .env to EC2
+        env:
+          EC2_HOST: ${{ steps.ec2.outputs.host }}
+        shell: bash
+        run: |
+          scp -o StrictHostKeyChecking=no -i key.pem app.env ${{ env.EC2_USER }}@${EC2_HOST}:/home/${{ env.EC2_USER }}/app.env
+
+      # Run container with --env-file
       - name: SSH and run container
         env:
           EC2_HOST: ${{ steps.ec2.outputs.host }}
         shell: bash
         run: |
-          set -e
-          REMOTE_SCRIPT=$(cat <<'EOS'
-          set -e
-          # Install docker if missing (super minimal)
-          if ! command -v docker >/dev/null 2>&1; then
-            curl -fsSL https://get.docker.com | sh
-            sudo systemctl enable --now docker || true
-          fi
-          sudo docker pull "${CONTAINER_IMAGE}"
-          sudo docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
-          sudo docker run --rm --name "${CONTAINER_NAME}" "${CONTAINER_IMAGE}"
-          EOS
-          )
           ssh -o StrictHostKeyChecking=no -i key.pem "$EC2_USER@${EC2_HOST}" \
-            "export CONTAINER_IMAGE='${CONTAINER_IMAGE}' CONTAINER_NAME='${CONTAINER_NAME}'; bash -s" \
-            <<< "$REMOTE_SCRIPT"
+            "export CONTAINER_IMAGE='${CONTAINER_IMAGE}' CONTAINER_NAME='${CONTAINER_NAME}'; \
+            sudo docker pull \"${CONTAINER_IMAGE}\" && \
+            sudo docker rm -f \"${CONTAINER_NAME}\" >/dev/null 2>&1 || true && \
+            sudo docker run --rm --name \"${CONTAINER_NAME}\" --env-file /home/${EC2_USER}/app.env \"${CONTAINER_IMAGE}\""
+
