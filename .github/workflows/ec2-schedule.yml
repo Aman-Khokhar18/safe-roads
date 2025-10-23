@@ -1,15 +1,15 @@
-name: Run GHCR image on EC2 (2h)
+name: Run GHCR image on EC2 (4h)
 
 on:
   schedule:
-    - cron: "0 */2 * * *"   # every 2 hours (UTC)
+    - cron: "0 */4 * * *"   # every 4 hours (UTC)
   workflow_dispatch: {}
 
 jobs:
   run:
     runs-on: ubuntu-latest
     permissions:
-      id-token: write   
+      id-token: write   # OIDC to assume role
       contents: read
 
     env:
@@ -26,7 +26,7 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Ensure EC2 is running + get host
+      - name: Ensure EC2 is running + get host & SG
         id: ec2
         shell: bash
         run: |
@@ -41,9 +41,30 @@ jobs:
           if [ -z "$HOST" ] || [ "$HOST" = "None" ]; then
             HOST=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
           fi
+          SG=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query 'Reservations[0].Instances[0].SecurityGroups[0].GroupId' --output text)
           echo "host=$HOST" >> "$GITHUB_OUTPUT"
+          echo "sg=$SG" >> "$GITHUB_OUTPUT"
 
-      - name: Write SSH key
+      - name: Get runner public IP
+        id: ip
+        shell: bash
+        run: |
+          set -euo pipefail
+          IP=$(curl -s https://checkip.amazonaws.com)
+          echo "ip=${IP}" >> "$GITHUB_OUTPUT"
+          echo "Runner IP: ${IP}"
+
+      - name: Temporarily allow SSH from this runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws ec2 authorize-security-group-ingress \
+            --group-id "${{ steps.ec2.outputs.sg }}" \
+            --protocol tcp --port 22 \
+            --cidr "${{ steps.ip.outputs.ip }}/32" \
+            >/dev/null || true
+
+      - name: Write SSH key to file
         shell: bash
         run: |
           mkdir -p ~/.ssh
@@ -59,8 +80,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
-          read -r -d '' REMOTE_SCRIPT <<'EOS'
+          REMOTE_SCRIPT=$(cat <<'EOS'
           set -euo pipefail
 
           # Install Docker if missing
@@ -84,7 +104,19 @@ jobs:
           docker pull "${CONTAINER_IMAGE}"
           docker run --rm --name "${CONTAINER_NAME}" "${CONTAINER_IMAGE}"
           EOS
+          )
 
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" \
             "export CONTAINER_IMAGE='${CONTAINER_IMAGE}' CONTAINER_NAME='${CONTAINER_NAME}'; bash -s" \
             <<< "$REMOTE_SCRIPT"
+
+      - name: Revoke temporary SSH rule
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws ec2 revoke-security-group-ingress \
+            --group-id "${{ steps.ec2.outputs.sg }}" \
+            --protocol tcp --port 22 \
+            --cidr "${{ steps.ip.outputs.ip }}/32" \
+            >/dev/null || true
