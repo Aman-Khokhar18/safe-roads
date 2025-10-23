@@ -1,15 +1,15 @@
-name: Run GHCR image on EC2 (2h)
+name: Run GHCR image on EC2 (4h)
 
 on:
   schedule:
-    - cron: "0 */2 * * *"   # every 2 hours (UTC)
+    - cron: "0 */4 * * *"   # every 4 hours (UTC)
   workflow_dispatch: {}
 
 jobs:
   run:
     runs-on: ubuntu-latest
     permissions:
-      id-token: write   
+      id-token: write   # for OIDC role
       contents: read
 
     env:
@@ -43,7 +43,7 @@ jobs:
           fi
           echo "host=$HOST" >> "$GITHUB_OUTPUT"
 
-      - name: Write SSH key
+      - name: Write SSH key to file
         shell: bash
         run: |
           mkdir -p ~/.ssh
@@ -60,9 +60,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          read -r -d '' REMOTE_SCRIPT <<'EOS'
+          REMOTE_SCRIPT=$(cat <<'EOS'
           set -euo pipefail
-
           # Install Docker if missing
           if ! command -v docker >/dev/null 2>&1; then
             if command -v apt-get >/dev/null 2>&1; then
@@ -84,6 +83,7 @@ jobs:
           docker pull "${CONTAINER_IMAGE}"
           docker run --rm --name "${CONTAINER_NAME}" "${CONTAINER_IMAGE}"
           EOS
+          )
 
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" \
             "export CONTAINER_IMAGE='${CONTAINER_IMAGE}' CONTAINER_NAME='${CONTAINER_NAME}'; bash -s" \
