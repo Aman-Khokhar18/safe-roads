@@ -17,7 +17,7 @@ dependencies = [
   "numpy",
   "folium",
   "scikit-learn",
-  "catboost=1.2",
+  "catboost==1.2",
   "matplotlib",
   "pydantic",
   "psycopg[binary]>=3",
