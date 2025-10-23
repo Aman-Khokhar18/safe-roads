@@ -63,9 +63,9 @@ jobs:
             curl -fsSL https://get.docker.com | sh
             sudo systemctl enable --now docker || true
           fi
-          docker pull "${CONTAINER_IMAGE}"
-          docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
-          docker run --rm --name "${CONTAINER_NAME}" "${CONTAINER_IMAGE}"
+          sudo docker pull "${CONTAINER_IMAGE}"
+          sudo docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+          sudo docker run --rm --name "${CONTAINER_NAME}" "${CONTAINER_IMAGE}"
           EOS
           )
           ssh -o StrictHostKeyChecking=no -i key.pem "$EC2_USER@${EC2_HOST}" \
