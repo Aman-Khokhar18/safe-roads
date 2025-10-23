@@ -10,88 +10,34 @@ from sklearn.model_selection import train_test_split
 
 def data_loader(table, chunksize: int | None = None):
     url = get_pg_url()
-    engine = create_engine(url)
+    engine = create_engine(url, pool_pre_ping=True)
+
     order_by = "h3, year, month, day, hour"
-    
     query = f"""
         SELECT
-        h3,
-        neighbor_1,
-        neighbor_2,
-        neighbor_3,
-        neighbor_4,
-        neighbor_5,
-        neighbor_6,
-        parent_h3,
-        name,
-        highway,
-        lanes,
-        width,
-        surface,
-        smoothness,
-        oneway,
-        junction,
-        traffic_signals,
-        traffic_calming,
-        crossing,
-        sidewalk,
-        cycleway,
-        bicycle,
-        lit,
-        access,
-        vehicle,
-        hgv,
-        psv,
-        bus,
-        overtaking,
-        bridge,
-        tunnel,
-        layer,
-        incline,
-        barrier,
-        amenity,
-        year,
-        month,
-        day,
-        hour,
-        is_weekend,
-        road_class3,
-        borough,
-        maxspeed_mph,
-        is_junction,
-        is_turn,
-        junction_degree,
-        temp,
-        dwpt,
-        rhum,
-        prcp,
-        snow,
-        wdir,
-        wspd,
-        wpgt,
-        pres,
-        tsun,
-        coco,
-        hour_sin,
-        hour_cos,
-        dow_sin,
-        dow_cos,
-        dom_sin,
-        dom_cos,
-        month_sin,
-        month_cos,
-        traffic_light_count,
-        crossing_count,
-        motorway_other_count,
-        cycleway_count
+            h3, neighbor_1, neighbor_2, neighbor_3, neighbor_4, neighbor_5, neighbor_6,
+            parent_h3, name, highway, lanes, width, surface, smoothness, oneway, junction,
+            traffic_signals, traffic_calming, crossing, sidewalk, cycleway, bicycle, lit,
+            access, vehicle, hgv, psv, bus, overtaking, bridge, tunnel, layer, incline,
+            barrier, amenity, year, month, day, hour, is_weekend, road_class3, borough,
+            maxspeed_mph, is_junction, is_turn, junction_degree, temp, dwpt, rhum, prcp,
+            snow, wdir, wspd, wpgt, pres, tsun, coco, hour_sin, hour_cos, dow_sin, dow_cos,
+            dom_sin, dom_cos, month_sin, month_cos, traffic_light_count, crossing_count,
+            motorway_other_count, cycleway_count
         FROM {table}
         ORDER BY {order_by}
     """
 
-    with engine.connect() as conn:
-        df = pd.read_sql_query(text(query), conn, chunksize=chunksize)
-
-    return df
+    # Keep the connection + transaction open while consuming the iterator
+    with engine.connect().execution_options(stream_results=True) as conn:
+        it = pd.read_sql_query(text(query), conn, chunksize=chunksize)
+        # Normalize to an iterator even if chunksize is None
+        if isinstance(it, pd.DataFrame):
+            yield it
+        else:
+            for chunk in it:
+                yield chunk
+                
 
 def handle_nans(config, data):
     NUMERICAL   = config["NUMERICAL"]

@@ -91,3 +91,21 @@ def any_attendant_tables(url: str) -> bool:
     eng = create_engine(url)
     with eng.connect() as cn:
         return cn.execute(sql).scalar()
+    
+
+import gc, os
+def free_memory(*objs):
+    # Drop strong refs
+    for o in objs:
+        try:
+            del o
+        except Exception:
+            pass
+    # Collect cyclic garbage
+    gc.collect()
+    # Return freed arenas to the OS (glibc)
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass

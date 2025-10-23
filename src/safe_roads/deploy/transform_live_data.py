@@ -1,5 +1,4 @@
 from prefect import task, get_run_logger
-from pathlib import Path
 from safe_roads.utils.data import _table_exists
 from safe_roads.query.deploy import run_sql
 from safe_roads.utils.config import get_pg_url
