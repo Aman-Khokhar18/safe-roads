@@ -5,7 +5,7 @@ import requests
 
 from sqlalchemy import create_engine
 from sqlalchemy.dialects.postgresql import VARCHAR, INTEGER, DOUBLE_PRECISION
-from prefect import task
+from prefect import task, get_run_logger
 
 from safe_roads.utils.mlutil import data_loader
 from safe_roads.utils.config import load_config, get_pg_url
@@ -38,6 +38,7 @@ def _scrub_jsonable(obj):
 
 @task
 def predict():
+    logger = get_run_logger()
     config = load_config("configs/app.yml")
     table_name = config['INPUT_TABLE']
     model_api = config['SAFE_ROADS_API']
@@ -48,6 +49,7 @@ def predict():
     OUT_TABLE  = config["OUT_TABLE"]
     IF_EXISTS0 = "replace"
 
+    logger.info(f"Loading data from table: {table_name}")
     df = data_loader(table_name)
     if df is None or len(df) == 0:
         raise RuntimeError(f"No rows returned by data_loader('{table_name}')")
@@ -73,6 +75,7 @@ def predict():
     }
 
     # Batching
+    logger.info(f"Scoring {n} rows via {endpoint} in batches of size {batch_size}.")
     num_batches = math.ceil(n / batch_size)
     print(f"Scoring {n} rows via {endpoint} in {num_batches} batches (size {batch_size}).")
 
@@ -117,8 +120,10 @@ def predict():
         )
         first = False
 
+        logger.info(f"Batch {b+1}/{num_batches}: wrote {len(out_df)} rows")
         print(f"Batch {b+1}/{num_batches}: wrote {len(out_df)} rows")
 
+    logger.info(f"Done. Wrote {n} rows to {OUT_TABLE}.")
     print(f"Done. Wrote {n} rows to {OUT_TABLE}.")
 
 
