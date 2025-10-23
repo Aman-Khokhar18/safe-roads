@@ -2,14 +2,14 @@ name: Run GHCR image on EC2 (4h)
 
 on:
   schedule:
-    - cron: "0 */4 * * *"   # every 4 hours (UTC)
+    - cron: "0 */4 * * *"     # every 4 hours (UTC)
   workflow_dispatch: {}
 
 jobs:
   run:
     runs-on: ubuntu-latest
     permissions:
-      id-token: write   # OIDC to assume role
+      id-token: write         # for OIDC role
       contents: read
 
     env:
@@ -26,97 +26,48 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Ensure EC2 is running + get host & SG
+      - name: Ensure EC2 is running + get host
         id: ec2
         shell: bash
         run: |
-          set -euo pipefail
+          set -e
           STATE=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query 'Reservations[0].Instances[0].State.Name' --output text)
           if [ "$STATE" != "running" ]; then
             aws ec2 start-instances --instance-ids "$INSTANCE_ID" >/dev/null
             aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
-            aws ec2 wait instance-status-ok --instance-ids "$INSTANCE_ID"
           fi
           HOST=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query 'Reservations[0].Instances[0].PublicDnsName' --output text)
           if [ -z "$HOST" ] || [ "$HOST" = "None" ]; then
             HOST=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
           fi
-          SG=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query 'Reservations[0].Instances[0].SecurityGroups[0].GroupId' --output text)
           echo "host=$HOST" >> "$GITHUB_OUTPUT"
-          echo "sg=$SG" >> "$GITHUB_OUTPUT"
 
-      - name: Get runner public IP
-        id: ip
+      - name: Write key.pem
         shell: bash
         run: |
-          set -euo pipefail
-          IP=$(curl -s https://checkip.amazonaws.com)
-          echo "ip=${IP}" >> "$GITHUB_OUTPUT"
-          echo "Runner IP: ${IP}"
-
-      - name: Temporarily allow SSH from this runner
-        shell: bash
-        run: |
-          set -euo pipefail
-          aws ec2 authorize-security-group-ingress \
-            --group-id "${{ steps.ec2.outputs.sg }}" \
-            --protocol tcp --port 22 \
-            --cidr "${{ steps.ip.outputs.ip }}/32" \
-            >/dev/null || true
-
-      - name: Write SSH key to file
-        shell: bash
-        run: |
-          mkdir -p ~/.ssh
           umask 077
-          cat > ~/.ssh/ec2_key << 'EOF'
-          ${{ secrets.EC2_SSH_KEY }}
-          EOF
-          chmod 600 ~/.ssh/ec2_key
+          printf '%s' "${{ secrets.EC2_SSH_KEY }}" > key.pem
+          sed -i 's/\r$//' key.pem
+          chmod 600 key.pem
 
-      - name: Pull & run on EC2
+      - name: SSH and run container
         env:
           EC2_HOST: ${{ steps.ec2.outputs.host }}
         shell: bash
         run: |
-          set -euo pipefail
+          set -e
           REMOTE_SCRIPT=$(cat <<'EOS'
-          set -euo pipefail
-
-          # Install Docker if missing
+          set -e
+          # Install docker if missing (super minimal)
           if ! command -v docker >/dev/null 2>&1; then
-            if command -v apt-get >/dev/null 2>&1; then
-              sudo apt-get update -y
-              sudo apt-get install -y docker.io
-              sudo systemctl enable --now docker
-            elif command -v yum >/dev/null 2>&1; then
-              sudo yum update -y
-              sudo amazon-linux-extras install -y docker || sudo yum install -y docker
-              sudo systemctl enable --now docker
-            else
-              curl -fsSL https://get.docker.com | sh
-              sudo systemctl enable --now docker || true
-            fi
+            curl -fsSL https://get.docker.com | sh
+            sudo systemctl enable --now docker || true
           fi
-
-          # Clean previous, pull & run
-          docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
           docker pull "${CONTAINER_IMAGE}"
+          docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
           docker run --rm --name "${CONTAINER_NAME}" "${CONTAINER_IMAGE}"
           EOS
           )
-
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/ec2_key "$EC2_USER@$EC2_HOST" \
+          ssh -o StrictHostKeyChecking=no -i key.pem "$EC2_USER@${EC2_HOST}" \
             "export CONTAINER_IMAGE='${CONTAINER_IMAGE}' CONTAINER_NAME='${CONTAINER_NAME}'; bash -s" \
             <<< "$REMOTE_SCRIPT"
-
-      - name: Revoke temporary SSH rule
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          aws ec2 revoke-security-group-ingress \
-            --group-id "${{ steps.ec2.outputs.sg }}" \
-            --protocol tcp --port 22 \
-            --cidr "${{ steps.ip.outputs.ip }}/32" \
-            >/dev/null || true
