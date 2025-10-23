@@ -15,10 +15,14 @@ env/
 keys
 
 # VCS / OS junk
-.git
-.gitignore
 .DS_Store
 Thumbs.db
+pyproject.toml
+.git
+.gitignore
+__pycache__/
+*.pyc
+
 
 # Data / outputs
 data/
