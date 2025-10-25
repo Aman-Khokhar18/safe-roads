@@ -1,11 +1,14 @@
 import math
+import gc
+import logging
+import math
 import numpy as np
 import pandas as pd
 import requests
-import logging
-import gc
-from tqdm.auto import tqdm
 
+from tqdm.auto import tqdm
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from sqlalchemy import create_engine
 from sqlalchemy.dialects.postgresql import VARCHAR, INTEGER, DOUBLE_PRECISION
@@ -46,29 +49,47 @@ def _scrub_jsonable(obj):
     return obj
 
 
+def _new_session_with_retries(total=5, backoff=0.5):
+    retry = Retry(
+        total=total,
+        backoff_factor=backoff,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["POST", "GET"],
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    s = requests.Session()
+    s.mount("http://", adapter)
+    s.mount("https://", adapter)
+    return s
+
+
 def predict():
     config      = load_config("configs/app.yml")
-    table_name  = config['INPUT_TABLE']
-    model_api   = config['SAFE_ROADS_API']
+    table_name  = config["INPUT_TABLE"]
+    model_api   = config["SAFE_ROADS_API"]
     endpoint    = model_api.rstrip("/") + "/predict"
-    batch_size  = int(config['BATCH_SIZE'])
-    timeout     = config['HTTP_TIMEOUT']
+    batch_size  = int(config["BATCH_SIZE"])
+    timeout     = config["HTTP_TIMEOUT"]
 
     # optional tunables
-    read_chunksize  = int(config.get('READ_CHUNKSIZE', 10_000))
-    write_chunksize = int(config.get('WRITE_CHUNKSIZE', 10_000))
+    read_chunksize  = int(config.get("READ_CHUNKSIZE", 10_000))
+    write_chunksize = int(config.get("WRITE_CHUNKSIZE", 10_000))
 
     OUT_TABLE  = config["OUT_TABLE"]
     IF_EXISTS0 = "replace"
 
+    # fixed total rows provided by you
+    TOTAL_ROWS = 3_159_825
+
     logger.info("Streaming data from table: %s (read_chunksize=%s)", table_name, read_chunksize)
-    df_iter = data_loader(table_name, chunksize=read_chunksize, mode='predict')
+    df_iter = data_loader(table_name, chunksize=read_chunksize, mode="predict")
 
     # Normalize to iterable if a full DataFrame is returned
     if isinstance(df_iter, pd.DataFrame):
         df_iter = [df_iter]
 
-    sess = requests.Session()
+    sess = _new_session_with_retries()
     engine = create_engine(url=get_pg_url(), pool_pre_ping=True)
 
     dtype_map = {
@@ -79,55 +100,61 @@ def predict():
     }
 
     first_write = True
-    total_rows  = 0
+    total_rows_written = 0
 
-    # overall rows processed (unknown total → no total=)
-    total_bar = tqdm(desc="Total processed", unit="rows", leave=True)
+    # single global progress bar in ROWS
+    pbar = tqdm(total=TOTAL_ROWS, desc="Predicting", unit="rows")
 
     for chunk_idx, chunk_df in enumerate(df_iter, start=1):
         if chunk_df is None or chunk_df.empty:
             continue
 
-        rows_in_chunk = len(chunk_df)
-        # per-chunk progress (counts rows, not just batches)
-        chunk_bar = tqdm(
-            total=rows_in_chunk,
-            desc=f"Chunk {chunk_idx}",
-            unit="rows",
-            leave=False,
-        )
-
-        # --- your existing prep code ---
+        # Ensure identifier columns exist
         for col in ("h3", "parent_h3"):
             if col not in chunk_df.columns:
                 chunk_df[col] = pd.NA
+
+        # Clean infinities/NaNs early
         chunk_df.replace([np.inf, -np.inf], pd.NA, inplace=True)
 
+        rows_in_chunk = len(chunk_df)
         num_batches_in_chunk = math.ceil(rows_in_chunk / batch_size)
+
         for b in range(num_batches_in_chunk):
             start = b * batch_size
             end   = min(rows_in_chunk, (b + 1) * batch_size)
+
             batch_df = chunk_df.iloc[start:end].copy()
             if batch_df.empty:
                 continue
 
             batch_df.replace([np.inf, -np.inf], pd.NA, inplace=True)
 
-            # payload + call
+            # JSON payload: scrub to plain Python + None
             batch_records = batch_df.where(batch_df.notna(), None).to_dict(orient="records")
             payload = {"instances": _scrub_jsonable(batch_records)}
+
+            # Call model
             resp = sess.post(endpoint, json=payload, timeout=timeout)
             resp.raise_for_status()
             out = resp.json()
 
-            # validate + extract
-            probs = out.get("probabilities", [])
+            # Validate response & extract
+            if "probabilities" not in out:
+                raise RuntimeError(f"Bad API response (missing 'probabilities'): {out}")
+
+            probs = out["probabilities"]
+            # Normalize if server returns list-of-dicts
+            if probs and isinstance(probs[0], dict):
+                key = "probability" if "probability" in probs[0] else "1" if "1" in probs[0] else None
+                if key is None:
+                    raise RuntimeError(f"Unrecognized probability schema: {probs[0]}")
+                probs = [float(p[key]) for p in probs]
+
             if len(probs) != len(batch_df):
-                # use tqdm.write so it doesn't clobber the bar
-                tqdm.write(
-                    f"ERROR: API output length mismatch: probs={len(probs)} vs batch={len(batch_df)}"
+                raise RuntimeError(
+                    f"API output length mismatch: probs={len(probs)} vs batch={len(batch_df)}"
                 )
-                raise RuntimeError("API output length mismatch with input batch")
 
             out_df = pd.DataFrame({
                 "h3": batch_df["h3"].astype("string"),
@@ -135,6 +162,7 @@ def predict():
                 "probability": [float(p) for p in probs],
             })
 
+            # Write immediately; keep memory low
             out_df.to_sql(
                 OUT_TABLE,
                 con=engine,
@@ -147,25 +175,20 @@ def predict():
             first_write = False
 
             wrote = len(out_df)
-            total_rows += wrote
-            # advance both bars by the number of rows processed in this batch
-            chunk_bar.update(wrote)
-            total_bar.update(wrote)
+            total_rows_written += wrote
+            pbar.update(wrote)  # advance by rows processed in this batch
 
+            # Free memory
             del out_df, batch_df, batch_records, probs, out
             gc.collect()
 
-        chunk_bar.close()
+    pbar.close()
 
-    total_bar.close()
-
-
-
-    if total_rows == 0:
+    if total_rows_written == 0:
         raise RuntimeError(f"No rows returned by data_loader('{table_name}')")
 
-    logger.info("Done. Wrote %d rows to %s.", total_rows, OUT_TABLE)
-    print(f"Done. Wrote {total_rows} rows to {OUT_TABLE}.")
+    logger.info("Done. Wrote %d rows to %s.", total_rows_written, OUT_TABLE)
+    print(f"Done. Wrote {total_rows_written} rows to {OUT_TABLE}.")
 
 
 if __name__ == "__main__":
