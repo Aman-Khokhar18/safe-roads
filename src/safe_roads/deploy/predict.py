@@ -4,6 +4,8 @@ import pandas as pd
 import requests
 import logging
 import gc
+from tqdm.auto import tqdm
+
 
 from sqlalchemy import create_engine
 from sqlalchemy.dialects.postgresql import VARCHAR, INTEGER, DOUBLE_PRECISION
@@ -60,7 +62,7 @@ def predict():
     IF_EXISTS0 = "replace"
 
     logger.info("Streaming data from table: %s (read_chunksize=%s)", table_name, read_chunksize)
-    df_iter = data_loader(table_name, chunksize=read_chunksize)
+    df_iter = data_loader(table_name, chunksize=read_chunksize, mode='predict')
 
     # Normalize to iterable if a full DataFrame is returned
     if isinstance(df_iter, pd.DataFrame):
@@ -79,54 +81,60 @@ def predict():
     first_write = True
     total_rows  = 0
 
+    # overall rows processed (unknown total → no total=)
+    total_bar = tqdm(desc="Total processed", unit="rows", leave=True)
+
     for chunk_idx, chunk_df in enumerate(df_iter, start=1):
         if chunk_df is None or chunk_df.empty:
             continue
 
-        # Ensure identifier columns exist
+        rows_in_chunk = len(chunk_df)
+        # per-chunk progress (counts rows, not just batches)
+        chunk_bar = tqdm(
+            total=rows_in_chunk,
+            desc=f"Chunk {chunk_idx}",
+            unit="rows",
+            leave=False,
+        )
+
+        # --- your existing prep code ---
         for col in ("h3", "parent_h3"):
             if col not in chunk_df.columns:
                 chunk_df[col] = pd.NA
-
-        # Clean infinities/NaNs early
         chunk_df.replace([np.inf, -np.inf], pd.NA, inplace=True)
 
-        logger.info("SQL chunk %d: %d rows", chunk_idx, len(chunk_df))
-
-        # Batch within the chunk for the model API
-        num_batches_in_chunk = math.ceil(len(chunk_df) / batch_size)
+        num_batches_in_chunk = math.ceil(rows_in_chunk / batch_size)
         for b in range(num_batches_in_chunk):
             start = b * batch_size
-            end   = min(len(chunk_df), (b + 1) * batch_size)
-
+            end   = min(rows_in_chunk, (b + 1) * batch_size)
             batch_df = chunk_df.iloc[start:end].copy()
             if batch_df.empty:
                 continue
 
             batch_df.replace([np.inf, -np.inf], pd.NA, inplace=True)
 
-            # JSON payload: scrub to plain Python + None
+            # payload + call
             batch_records = batch_df.where(batch_df.notna(), None).to_dict(orient="records")
             payload = {"instances": _scrub_jsonable(batch_records)}
-
-            # Call model
             resp = sess.post(endpoint, json=payload, timeout=timeout)
             resp.raise_for_status()
             out = resp.json()
 
-            preds = out.get("predictions", [])
+            # validate + extract
             probs = out.get("probabilities", [])
-            if len(preds) != len(batch_df) or len(probs) != len(batch_df):
+            if len(probs) != len(batch_df):
+                # use tqdm.write so it doesn't clobber the bar
+                tqdm.write(
+                    f"ERROR: API output length mismatch: probs={len(probs)} vs batch={len(batch_df)}"
+                )
                 raise RuntimeError("API output length mismatch with input batch")
 
             out_df = pd.DataFrame({
                 "h3": batch_df["h3"].astype("string"),
                 "parent_h3": batch_df["parent_h3"].astype("string"),
-                "prediction": [int(x) for x in preds],
                 "probability": [float(p) for p in probs],
             })
 
-            # Write immediately; keep memory low
             out_df.to_sql(
                 OUT_TABLE,
                 con=engine,
@@ -138,15 +146,20 @@ def predict():
             )
             first_write = False
 
-            total_rows += len(out_df)
-            logger.info(
-                "Chunk %d batch %d/%d: wrote %d rows (total %d)",
-                chunk_idx, b + 1, num_batches_in_chunk, len(out_df), total_rows
-            )
+            wrote = len(out_df)
+            total_rows += wrote
+            # advance both bars by the number of rows processed in this batch
+            chunk_bar.update(wrote)
+            total_bar.update(wrote)
 
-            # Free memory
-            del out_df, batch_df, batch_records, preds, probs, out
+            del out_df, batch_df, batch_records, probs, out
             gc.collect()
+
+        chunk_bar.close()
+
+    total_bar.close()
+
+
 
     if total_rows == 0:
         raise RuntimeError(f"No rows returned by data_loader('{table_name}')")

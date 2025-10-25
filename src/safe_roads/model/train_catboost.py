@@ -1,8 +1,5 @@
-import pandas as pd
 import json
-import os
-from tqdm.auto import tqdm
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+from sklearn.metrics import (brier_score_loss, average_precision_score, roc_auc_score, log_loss)
 from pathlib import Path
 
 from prefect import flow
@@ -16,28 +13,19 @@ from safe_roads.utils.config import load_config
 
 @flow(name="Train CatBoost model")
 def train():
-
     config = load_config("configs/train.yml")
     EXPERIMENT_NAME = config['EXPERIMENT_NAME']
     RANDOM_STATE = config['RANDOM_STATE']
     EARLY_STOPPING_ROUNDS = config['EARLY_STOPPING_ROUNDS']
 
-    TEST_SIZE = config["TEST_SIZE"]
-    VAL_SIZE = config["VAL_SIZE"]
-
-    # Only used locally now
     LOCAL_MODEL_DIR = Path(config.get("LOCAL_MODEL_DIR", "artifacts/catboost_model"))
 
     mlflow.set_tracking_uri("http://localhost:5000")
 
     # --- Data ---
-    with tqdm(total=2, desc="Loading data") as p:
-        pos = data_loader("roads_features_collision")
-        p.update(1)
-        neg = data_loader("roads_features_negatives")
-        p.update(1)
+    data = next(data_loader("combined_dataset", chunksize=None))
 
-    X_train, y_train, X_val, y_val, X_test, y_test = prepare_data(config, pos, neg)
+    X_train, y_train, X_val, y_val, X_test, y_test = prepare_data(config, data)
 
     cat_cols = [c for c in config["CATEGORICAL"] if c in X_train.columns]
     features = list(X_train.columns)
@@ -48,33 +36,33 @@ def train():
     model = CatBoostClassifier(
         task_type='GPU',
         loss_function="Logloss",
-        eval_metric="PRAUC",
-        custom_metric=["Precision", "Recall","F1"],
+        eval_metric="BrierScore",
+        custom_metric=["PRAUC","AUC","Logloss"],
         iterations=3000,
         learning_rate=0.01,
-        depth=6,
-        min_data_in_leaf=6,
-        l2_leaf_reg=1.0,
+        depth=7,
         random_seed=RANDOM_STATE,
         use_best_model=True,
-        verbose=True,
-        auto_class_weights="Balanced",
+        verbose=100,
+        class_weights={0: 1.0, 1: 1.0} 
     )
 
     # ---- MLflow ----
     mlflow.set_experiment(EXPERIMENT_NAME)
     with mlflow.start_run(run_name="catboost_binary") as run:
-
+        run_id = run.info.run_id
         # Log small/metadata to MLflow
         mlflow.log_text(json.dumps(list(X_train.columns), indent=2), "features.json")
+        params = model.get_params()
         mlflow.log_params({
-            "n_rows_train": X_train.shape[0],
-            "n_features": X_train.shape[1],
-            "test_size": TEST_SIZE,
-            "val_size": VAL_SIZE,
-            "early_stopping": True,
-            "learning_rate_scheduler": False,
-            "cat_feature_names": cat_cols,
+            "loss_function": params.get("loss_function"),
+            "eval_metric": params.get("eval_metric"),
+            "custom_metric": ",".join(params.get("custom_metric") or []),
+            "iterations": params.get("iterations"),
+            "learning_rate": params.get("learning_rate"),
+            "depth": params.get("depth"),
+            "random_seed": params.get("random_seed"),
+            "class_weights": params.get("class_weights")
         })
         
         # Train
@@ -87,52 +75,55 @@ def train():
 
         best_iter = model.get_best_iteration()
 
-        y_test_pred = model.predict(X_test)
-        test_acc  = accuracy_score(y_test, y_test_pred)
-        test_f1   = f1_score(y_test, y_test_pred)
-        test_prec = precision_score(y_test, y_test_pred)
-        test_rec  = recall_score(y_test, y_test_pred)
+        # --- Probability-metrics ---
+        test_probs = model.predict_proba(X_test)[:, 1]
+        brier = brier_score_loss(y_test, test_probs)
+        auc   = roc_auc_score(y_test, test_probs)
+        ap    = average_precision_score(y_test, test_probs)   # PRAUC
+        logloss = log_loss(y_test, test_probs, labels=[0,1])
+
+        pi = y_test.mean()
+        bss = 1.0 - brier / (pi * (1 - pi))                   # Brier Skill Score
 
         mlflow.log_metrics({
-            "test_accuracy": test_acc,
-            "test_f1": test_f1,
-            "test_precision": test_prec,
-            "test_recall": test_rec,
+            "AUC": auc,
+            "PRAUC": ap,
+            "LogLoss": logloss,
+            "brier": brier,
+            "bss": bss
         })
 
         mlflow.log_dict(model.get_all_params(), "artifacts/catboost_all_params.json")
 
-        # ---------- Local save only ----------
+        # ---------- Local save----------
         LOCAL_MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
-        model_path = LOCAL_MODEL_DIR / "model.cbm"
+        model_path = LOCAL_MODEL_DIR / f"model_{run_id}.cbm"
         model.save_model(model_path)
 
-        (LOCAL_MODEL_DIR / "features.json").write_text(
+        (LOCAL_MODEL_DIR / f"features_{run_id}.json").write_text(
             json.dumps(list(X_train.columns), indent=2)
         )
         meta = {
             "best_iteration": int(best_iter),
             "class_names": model.get_param("class_names"),
             "params": model.get_all_params(),
-
-            # Add these so handle_nans can run at serve-time:
             "CATEGORICAL": config["CATEGORICAL"],
             "NUMERICAL":  config["NUMERICAL"],
             "BOOLEAN":    config["BOOLEAN"],
-
             "cat_feature_indices": cat_feature_indices,
-            "categorical_sentinel": "<NA>",  
+            "categorical_sentinel": "__MISSING__", 
         }
-        (LOCAL_MODEL_DIR / "model_meta.json").write_text(json.dumps(meta, indent=2))
+        (LOCAL_MODEL_DIR / f"model_meta_{run_id}.json").write_text(json.dumps(meta, indent=2))
 
         mlflow.log_artifacts(str(LOCAL_MODEL_DIR), artifact_path="catboost_model_local")
 
     print(f"Best iteration: {best_iter}")
-    print(f"  Accuracy : {test_acc:.4f}")
-    print(f"  F1       : {test_f1:.4f}")
-    print(f"  Precision: {test_prec:.4f}")
-    print(f"  Recall   : {test_rec:.4f}")
+    print(f"  AUC      : {auc:.4f}")
+    print(f"  PRAUC    : {ap:.4f}")
+    print(f"  LogLoss  : {logloss:.4f}")
+    print(f"  Brier    : {brier:.4f}")  
+    print(f"  BSS      : {bss:.4f}") 
 
     print("\nTraining complete. Model saved to:", LOCAL_MODEL_DIR)
 

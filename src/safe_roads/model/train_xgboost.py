@@ -1,78 +1,67 @@
 import pandas as pd
 import json
-from tqdm.auto import tqdm
-import xgboost as xgb
-from xgboost import callback
-
 import os
-os.environ["PREFECT_API_URL"] = "http://localhost:4200/api"
-os.environ["PREFECT_API_ENABLE_EPHEMERAL_SERVER"] = "false"
-from prefect import task
+from tqdm.auto import tqdm
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, precision_recall_curve
+from pathlib import Path
+import numpy as np  # <-- added
+
+from prefect import flow
 
 import mlflow
-import mlflow.xgboost
-mlflow.set_tracking_uri("http://localhost:5000")
+import xgboost as xgb
 
-from safe_roads.utils.mlutil import data_loader,  prepare_data
+from safe_roads.utils.mlutil import data_loader, prepare_data
 from safe_roads.utils.config import load_config
-    
 
-@task(name="Train XGBOOST model")
+
+@flow(name="Train XGBoost model")
 def train():
 
     config = load_config("configs/train.yml")
     EXPERIMENT_NAME = config['EXPERIMENT_NAME']
     RANDOM_STATE = config['RANDOM_STATE']
-    TARGET = config["TARGET"]
+    EARLY_STOPPING_ROUNDS = config['EARLY_STOPPING_ROUNDS']
+
     TEST_SIZE = config["TEST_SIZE"]
     VAL_SIZE = config["VAL_SIZE"]
 
-    with tqdm(total=2, desc="Loading data") as p:
-        pos = data_loader("roads_features_collision")
-        p.update(1)
-        neg = data_loader("roads_features_negatives")
-        p.update(1)
+    # Only used locally now
+    LOCAL_MODEL_DIR = Path(config.get("LOCAL_MODEL_DIR", "artifacts/xgboost_model"))
 
+    mlflow.set_tracking_uri("http://localhost:5000")
 
+    # --- Data ---
+    data = next(data_loader("combined_dataset", chunksize=None))
 
-    X_train, y_train, X_val, y_val, _, _  = prepare_data(config, pos, neg)
+    X_train, y_train, X_val, y_val, X_test, y_test = prepare_data(config, data)
 
-    pos_label = config["POS_LABEL"]
-    pos_cnt = (y_train == pos_label).sum()
-    neg_cnt = (y_train != pos_label).sum()
-    scale_pos_weight = (neg_cnt / max(1, pos_cnt))
+    cat_cols = [c for c in config["CATEGORICAL"] if c in X_train.columns]
+    features = list(X_train.columns)
+    name_to_idx = {n: i for i, n in enumerate(features)}
+    cat_feature_indices = [name_to_idx[n] for n in cat_cols if n in name_to_idx]
 
-    early_stop = xgb.callback.EarlyStopping(
-    rounds=5, metric_name='aucpr', maximize=True, save_best=True,  min_delta=1e-4)
-
-    lr_sched = xgb.callback.LearningRateScheduler(
-    lambda t: 0.05 if t < 50 else (0.1 if t < 200 else (0.05 if t < 1000 else 0.01))
-)                    
-    model = xgb.XGBClassifier( 
-        objective="binary:logistic",  
-        tree_method="hist", 
-        enable_categorical = True,
-        n_estimators=3000,
-        learning_rate=0.1,
-        min_child_weight=5,
-        max_depth=5,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        reg_lambda =1.0,
-        reg_alpha=0.5,
+    # ---- Model ----
+    model = xgb.XGBClassifier(
+        tree_method="hist",
+        enable_categorical=True,     
+        objective="binary:logistic",
         eval_metric="aucpr",
-        scale_pos_weight= float(scale_pos_weight),
+        n_estimators=2000,
+        learning_rate=0.02,
+        max_depth=6,
+        min_child_weight=6,           
+        reg_lambda=1.0,
         random_state=RANDOM_STATE,
-        callbacks = [early_stop, lr_sched]
+        scale_pos_weight=4.92,        
+        verbosity=1
     )
-
 
     # ---- MLflow ----
     mlflow.set_experiment(EXPERIMENT_NAME)
-    mlflow.xgboost.autolog(log_input_examples=False, log_model_signatures=False, log_models=True)
+    with mlflow.start_run(run_name="catboost_binary") as run:
 
-    with mlflow.start_run(run_name="xgb_categorical_hist"):
-        # Always log features used
+        # Log small/metadata to MLflow
         mlflow.log_text(json.dumps(list(X_train.columns), indent=2), "features.json")
         mlflow.log_params({
             "n_rows_train": X_train.shape[0],
@@ -80,23 +69,84 @@ def train():
             "test_size": TEST_SIZE,
             "val_size": VAL_SIZE,
             "early_stopping": True,
-            "learning_rate": True, 
-            "scale_pos_weight": float(scale_pos_weight),
+            "learning_rate_scheduler": False,
+            "cat_feature_names": cat_cols,
         })
+        
+        # Train
+        model.fit(
+            X_train, y_train,
+            eval_set=(X_val, y_val),
+           verbose=100,
+        )
 
-        model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=True)
+        best_iter = (getattr(model, "best_iteration", None) or
+             getattr(model, "best_iteration_", None) or
+             model.n_estimators)
+
+        best_score = getattr(model, "best_score", None) 
+
+        # --- Decision threshold from validation set (F1-optimal) ---
+        val_probs = model.predict_proba(X_val)[:, 1]
+        prec, rec, thr = precision_recall_curve(y_val, val_probs)
+        f1s = 2 * prec[:-1] * rec[:-1] / (prec[:-1] + rec[:-1] + 1e-9)
+        best_idx = int(np.argmax(f1s))
+        BEST_THRESHOLD = float(thr[best_idx])
+
+        # --- Test predictions using chosen threshold ---
+        test_probs = model.predict_proba(X_test)[:, 1]
+        y_test_pred = (test_probs >= BEST_THRESHOLD).astype(int)
+
+        test_acc  = accuracy_score(y_test, y_test_pred)
+        test_f1   = f1_score(y_test, y_test_pred)
+        test_prec = precision_score(y_test, y_test_pred)
+        test_rec  = recall_score(y_test, y_test_pred)
 
         mlflow.log_metrics({
-        "best_iteration": int(model.best_iteration),
-        "best_score": float(model.best_score),
-        "n_estimators_effective": int(model.best_iteration + 1),
+            "test_accuracy": test_acc,
+            "test_f1": test_f1,
+            "test_precision": test_prec,
+            "test_recall": test_rec,
         })
 
+        mlflow.log_dict(model.get_all_params(), "artifacts/catboost_all_params.json")
 
-    print(model.best_iteration, model.best_score)
-    print(model.evals_result())
-    print("Training complete.")
+        # ---------- Local save----------
+        LOCAL_MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
+        model_path = LOCAL_MODEL_DIR / "model_2.cbm"
+        model.save_model(model_path)
+
+        (LOCAL_MODEL_DIR / "features.json").write_text(
+            json.dumps(list(X_train.columns), indent=2)
+        )
+        meta = {
+            "best_iteration": int(best_iter),
+            "class_names": model.get_param("class_names"),
+            "params": model.get_all_params(),
+
+            "CATEGORICAL": config["CATEGORICAL"],
+            "NUMERICAL":  config["NUMERICAL"],
+            "BOOLEAN":    config["BOOLEAN"],
+
+            "cat_feature_indices": cat_feature_indices,
+            "categorical_sentinel": "<NA>",
+            "decision_threshold": BEST_THRESHOLD,  
+        }
+        (LOCAL_MODEL_DIR / "model_meta.json").write_text(json.dumps(meta, indent=2))
+
+        mlflow.log_artifacts(str(LOCAL_MODEL_DIR), artifact_path="catboost_model_local")
+
+    print(f"Best iteration: {best_iter}")
+    print(F"  Best AUCPR : {best_score:.4f}")
+    print(f"  Accuracy : {test_acc:.4f}")
+    print(f"  F1       : {test_f1:.4f}")
+    print(f"  Precision: {test_prec:.4f}")
+    print(f"  Recall   : {test_rec:.4f}")
+    print(f"  Threshold: {BEST_THRESHOLD:.4f}")  
+     
+
+    print("\nTraining complete. Model saved to:", LOCAL_MODEL_DIR)
 
 
 if __name__ == "__main__":

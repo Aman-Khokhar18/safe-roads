@@ -1,10 +1,9 @@
-EXPERIMENT_NAME: "safe-roads"
+EXPERIMENT_NAME: "safe-roads_v1"
 RANDOM_STATE: 42
-EARLY_STOPPING_ROUNDS: 50
+EARLY_STOPPING_ROUNDS: 20
 
 CATEGORICAL: [
-    "h3","neighbor_1","neighbor_2","neighbor_3","neighbor_4","neighbor_5","neighbor_6",
-    "parent_h3","name","highway","surface","oneway","junction",
+   "highway","surface","oneway","junction",
     "traffic_signals","traffic_calming","crossing","sidewalk","cycleway","bicycle","lit",
     "access","vehicle","hgv","psv","bus","overtaking","bridge","tunnel","layer","incline",
     "barrier","amenity","road_class3","borough", 
@@ -14,7 +13,8 @@ NUMERICAL: [
     "width","smoothness","lanes","temp","dwpt","rhum","prcp","snow","wdir","wspd","wpgt",
     "pres","tsun","coco","day","hour","is_weekend", "hour_sin", "hour_cos", "dow_sin",
     "dow_cos", "dom_sin", "dom_cos", "month_sin", "month_cos", traffic_light_count, crossing_count,
-    motorway_other_count, cycleway_count
+    motorway_other_count, cycleway_count, h3_collisions_last_year, n1_collisions_last_year,n2_collisions_last_year,
+    n3_collisions_last_year, n4_collisions_last_year, n5_collisions_last_year,n6_collisions_last_year, parent_collisions_last_year,
 ]
 
 BOOLEAN: ["is_junction", "is_turn"]

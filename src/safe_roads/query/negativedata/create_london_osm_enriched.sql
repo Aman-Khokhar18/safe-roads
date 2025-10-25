@@ -1,6 +1,3 @@
--- ======================================================================
--- Build (no DISTINCT on combo_id; drop point-only rows)
--- ======================================================================
 DROP TABLE IF EXISTS public.london_osm_daily_enriched;
 
 CREATE TABLE public.london_osm_daily_enriched AS
