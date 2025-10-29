@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "saferoads"
+version = "0.1.0"
+dependencies = [
+  "h3>=4",
+  "requests",
+  "PyYAML",
+  "prefect>=3",
+  "mlflow",
+  "pandas",
+  "osmnx",
+  "meteostat",
+  "numpy",
+  "folium",
+  "scikit-learn",
+  "catboost==1.2",
+  "matplotlib",
+  "pydantic",
+  "psycopg[binary]>=3",
+  "SQLAlchemy",
+  "shapely",
+  "pyproj",
+  "geopandas",
+  "python-dotenv",
+  "tqdm",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

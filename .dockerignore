@@ -1,0 +1,47 @@
+# Python / build
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+build/
+dist/
+
+.mlflow_artifacts
+artifacts
+cache
+catboost_info
+mlruns
+notebooks
+ohsome_log
+outputs
+*.egg-info/
+
+# Envs & secrets
+.env
+.venv/
+venv/
+env/
+keys
+
+# VCS / OS junk
+.DS_Store
+Thumbs.db
+pyproject.toml
+.git
+.gitignore
+__pycache__/
+*.pyc
+
+
+# Data / outputs
+data/
+datasets/
+outputs/
+runs/
+mlruns/
+checkpoints/
+
+# Notebooks/temp
+.ipynb_checkpoints/
+*.log

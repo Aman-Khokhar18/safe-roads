@@ -1,0 +1,12 @@
+python-dotenv
+pyyaml>=6,<7
+meteostat
+pandas==2.2.3
+numpy==2.0.2 
+SQLAlchemy>=2,<3
+psycopg[binary]>=3.2,<4  
+sqlparse
+tqdm
+scikit-learn
+uvicorn
+requests

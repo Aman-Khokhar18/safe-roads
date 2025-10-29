@@ -1,0 +1,88 @@
+name: Run GHCR image on EC2 (4h)
+
+on:
+  schedule:
+    - cron: "0 */2 * * *"     # every 2 hours (UTC)
+  workflow_dispatch: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write         # for OIDC role
+      contents: read
+
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+      EC2_USER: ${{ secrets.EC2_USER }}
+      CONTAINER_IMAGE: ${{ secrets.CONTAINER_IMAGE }}
+      CONTAINER_NAME: my-python-job
+
+    steps:
+      - name: Configure AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Ensure EC2 is running + get host
+        id: ec2
+        shell: bash
+        run: |
+          set -e
+          STATE=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query 'Reservations[0].Instances[0].State.Name' --output text)
+          if [ "$STATE" != "running" ]; then
+            aws ec2 start-instances --instance-ids "$INSTANCE_ID" >/dev/null
+            aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
+          fi
+          HOST=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query 'Reservations[0].Instances[0].PublicDnsName' --output text)
+          if [ -z "$HOST" ] || [ "$HOST" = "None" ]; then
+            HOST=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+          fi
+          echo "host=$HOST" >> "$GITHUB_OUTPUT"
+
+      - name: Write key.pem
+        shell: bash
+        run: |
+          umask 077
+          printf '%s' "${{ secrets.EC2_SSH_KEY }}" > key.pem
+          sed -i 's/\r$//' key.pem
+          chmod 600 key.pem
+
+      # Build a minimal .env (runner only)
+      - name: Build .env
+        shell: bash
+        run: |
+          umask 077
+          cat > app.env <<'EOF'
+          DATABASE_URL=${{ secrets.DATABASE_URL }}
+          SAFE_ROADS_API=${{ secrets.SAFE_ROADS_API }}
+          HTTP_TIMEOUT=30
+          G_TOKEN=${{ secrets.G_TOKEN}}
+          EOF
+
+      # Copy .env to EC2
+      - name: Copy .env to EC2
+        env:
+          EC2_HOST: ${{ steps.ec2.outputs.host }}
+        shell: bash
+        run: |
+          scp -o StrictHostKeyChecking=no -i key.pem app.env ${{ env.EC2_USER }}@${EC2_HOST}:/home/${{ env.EC2_USER }}/app.env
+
+      # Run container with --env-file
+      - name: SSH and run container
+        env:
+          EC2_HOST: ${{ steps.ec2.outputs.host }}
+        shell: bash
+        run: |
+          ssh -o StrictHostKeyChecking=no -i key.pem "$EC2_USER@${EC2_HOST}" \
+            "export CONTAINER_IMAGE='${CONTAINER_IMAGE}' CONTAINER_NAME='${CONTAINER_NAME}'; \
+            sudo docker pull \"${CONTAINER_IMAGE}\" && \
+            sudo docker rm -f \"${CONTAINER_NAME}\" >/dev/null 2>&1 || true && \
+            sudo docker run --rm --name \"${CONTAINER_NAME}\" --env-file /home/${EC2_USER}/app.env \"${CONTAINER_IMAGE}\""
+            sudo docker run --rm --name "$CONTAINER_NAME" \
+            --env-file "/home/${EC2_USER}/app.env" \
+            -e G_TOKEN="${GITHUB_TOKEN}" \
+            "$CONTAINER_IMAGE"
+
