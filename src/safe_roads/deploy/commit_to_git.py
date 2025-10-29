@@ -8,7 +8,7 @@ load_dotenv()
 DB_DSN = os.getenv("DATABASE_URL")
 PREDICTION_TABLE = "prediction"
 
-TOKEN = os.environ["GITHUB_TOKEN"]  
+TOKEN = os.environ["G_TOKEN"]  
 REPO_FULL = "Aman-Khokhar18/safe-roads-london"
 
 BRANCH = "main"
