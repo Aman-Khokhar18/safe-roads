@@ -2,14 +2,18 @@ name: Run GHCR image on EC2 (4h)
 
 on:
   schedule:
-    - cron: "0 */2 * * *"     # every 2 hours (UTC)
-  workflow_dispatch: {}
+    - cron: "0 */2 * * *"   # every 2 hours (UTC)
+  workflow_dispatch:
+
+concurrency:
+  group: ec2-run
+  cancel-in-progress: false
 
 jobs:
   run:
     runs-on: ubuntu-latest
     permissions:
-      id-token: write         # for OIDC role
+      id-token: write
       contents: read
 
     env:
@@ -30,7 +34,7 @@ jobs:
         id: ec2
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           STATE=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query 'Reservations[0].Instances[0].State.Name' --output text)
           if [ "$STATE" != "running" ]; then
             aws ec2 start-instances --instance-ids "$INSTANCE_ID" >/dev/null
@@ -42,50 +46,60 @@ jobs:
           fi
           echo "host=$HOST" >> "$GITHUB_OUTPUT"
 
-      - name: Write key.pem
+      - name: Write SSH key
         shell: bash
         run: |
+          set -euo pipefail
           umask 077
           printf '%s' "${{ secrets.EC2_SSH_KEY }}" > key.pem
           sed -i 's/\r$//' key.pem
           chmod 600 key.pem
 
-      # Build a minimal .env (runner only)
-      - name: Build .env
+      - name: Build app.env
         shell: bash
         run: |
+          set -euo pipefail
           umask 077
-          cat > app.env <<'EOF'
+          cat > app.env <<EOF
           DATABASE_URL=${{ secrets.DATABASE_URL }}
           SAFE_ROADS_API=${{ secrets.SAFE_ROADS_API }}
           HTTP_TIMEOUT=30
-<<<<<<< HEAD
-=======
-          G_TOKEN=${{ secrets.G_TOKEN}}
->>>>>>> 1caada2 (new)
+          G_TOKEN=${{ secrets.G_TOKEN }}
           EOF
+          # Normalize line endings to avoid Docker env-file parse issues
+          sed -i 's/\r$//' app.env
+          # Presence check without printing the secret
+          grep -n '^G_TOKEN=' app.env >/dev/null || { echo "G_TOKEN missing in app.env"; exit 1; }
 
-      # Copy .env to EC2
-      - name: Copy .env to EC2
+      - name: Copy app.env to EC2
         env:
           EC2_HOST: ${{ steps.ec2.outputs.host }}
         shell: bash
         run: |
-          scp -o StrictHostKeyChecking=no -i key.pem app.env ${{ env.EC2_USER }}@${EC2_HOST}:/home/${{ env.EC2_USER }}/app.env
+          set -euo pipefail
+          scp -o StrictHostKeyChecking=no -i key.pem app.env "$EC2_USER@${EC2_HOST}:~/app.env"
 
-      # Run container with --env-file
       - name: SSH and run container
         env:
           EC2_HOST: ${{ steps.ec2.outputs.host }}
         shell: bash
         run: |
-          ssh -o StrictHostKeyChecking=no -i key.pem "$EC2_USER@${EC2_HOST}" \
-            "export CONTAINER_IMAGE='${CONTAINER_IMAGE}' CONTAINER_NAME='${CONTAINER_NAME}'; \
-            sudo docker pull \"${CONTAINER_IMAGE}\" && \
-            sudo docker rm -f \"${CONTAINER_NAME}\" >/dev/null 2>&1 || true && \
-            sudo docker run --rm --name \"${CONTAINER_NAME}\" --env-file /home/${EC2_USER}/app.env \"${CONTAINER_IMAGE}\""
-            sudo docker run --rm --name "$CONTAINER_NAME" \
-            --env-file "/home/${EC2_USER}/app.env" \
-            -e G_TOKEN="${GITHUB_TOKEN}" \
-            "$CONTAINER_IMAGE"
+          set -euo pipefail
+          ssh -o StrictHostKeyChecking=no -i key.pem "$EC2_USER@${EC2_HOST}" bash -s <<EOF
+          set -euo pipefail
+          ENV_FILE="\$HOME/app.env"
+          test -f "\$ENV_FILE"
+          grep -n '^G_TOKEN=' "\$ENV_FILE" >/dev/null || { echo "G_TOKEN missing in env file"; exit 1; }
 
+          sudo docker pull "${CONTAINER_IMAGE}"
+          sudo docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+          sudo docker run --rm --name "${CONTAINER_NAME}" \
+            --env-file "\$ENV_FILE" \
+            "${CONTAINER_IMAGE}"
+          EOF
+
+      - name: Cleanup local artifacts
+        if: always()
+        shell: bash
+        run: |
+          rm -f key.pem app.env
