@@ -80,4 +80,8 @@ jobs:
             sudo docker pull \"${CONTAINER_IMAGE}\" && \
             sudo docker rm -f \"${CONTAINER_NAME}\" >/dev/null 2>&1 || true && \
             sudo docker run --rm --name \"${CONTAINER_NAME}\" --env-file /home/${EC2_USER}/app.env \"${CONTAINER_IMAGE}\""
+            sudo docker run --rm --name "$CONTAINER_NAME" \
+            --env-file "/home/${EC2_USER}/app.env" \
+            -e G_TOKEN="${GITHUB_TOKEN}" \
+            "$CONTAINER_IMAGE"
 
