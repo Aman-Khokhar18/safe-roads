@@ -59,6 +59,10 @@ jobs:
           DATABASE_URL=${{ secrets.DATABASE_URL }}
           SAFE_ROADS_API=${{ secrets.SAFE_ROADS_API }}
           HTTP_TIMEOUT=30
+<<<<<<< HEAD
+=======
+          G_TOKEN=${{ secrets.G_TOKEN}}
+>>>>>>> 1caada2 (new)
           EOF
 
       # Copy .env to EC2
