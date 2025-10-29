@@ -42,7 +42,8 @@ jobs:
             aws ec2 start-instances --instance-ids "$INSTANCE_ID" >/dev/null
             aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
           fi
-          # Wait for both AWS status checks (instance & system)
+
+          # Wait for both AWS status checks to pass
           aws ec2 wait instance-status-ok --instance-ids "$INSTANCE_ID"
 
           HOST=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query 'Reservations[0].Instances[0].PublicDnsName' --output text)
@@ -99,14 +100,21 @@ jobs:
             -o ServerAliveInterval=15 -o ServerAliveCountMax=60 \
             -o TCPKeepAlive=yes -o ConnectionAttempts=30 -o ConnectTimeout=10 \
             -i key.pem"
-          # small retry loop for flaky first contact
+          ok=0
           for i in {1..5}; do
-            scp $SSH_OPTS app.env "$EC2_USER@${EC2_HOST}:~/app.env" && break || sleep 5
+            if scp $SSH_OPTS app.env "$EC2_USER@${EC2_HOST}:~/app.env"; then
+              ok=1; break
+            fi
+            sleep 5
           done
+          if [ "$ok" -ne 1 ]; then
+            echo "Failed to scp app.env to $EC2_HOST after retries"; exit 1
+          fi
 
-      - name: SSH and run container (robust + noisy)
+      - name: SSH and run container (detached, with OOM diagnostics)
         env:
           EC2_HOST: ${{ steps.ec2.outputs.host }}
+          CONTAINER_MEM: ${{ secrets.CONTAINER_MEM }}   # optional, e.g. "3g"
         shell: bash
         run: |
           set -euo pipefail
@@ -127,19 +135,56 @@ jobs:
               sudo apt-get update -y
               sudo apt-get install -y docker.io
             else
-              # Amazon Linux 2
-              sudo amazon-linux-extras install -y docker || sudo yum install -y docker
+              # Amazon Linux 2 / RHEL family
+              sudo amazon-linux-extras install -y docker || sudo yum install -y docker || sudo dnf install -y docker
             fi
           fi
           sudo systemctl enable --now docker || true
           sudo docker version || { echo "Docker not ready"; exit 1; }
 
-          # Pull and run in foreground with unbuffered stdout to keep session active
+          # Pull latest image
           sudo docker pull "${CONTAINER_IMAGE}"
+
+          # Stop any previous container
           sudo docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
-          stdbuf -o0 sudo docker run --rm --name "${CONTAINER_NAME}" \
+
+          # Optional memory cap if provided (e.g. 3g). This line is locally expanded by Actions:
+          CONTAINER_MEM_VAL="${CONTAINER_MEM}"
+          RUN_MEM_ARGS=()
+          if [ -n "\$CONTAINER_MEM_VAL" ]; then
+            RUN_MEM_ARGS+=(--memory "\$CONTAINER_MEM_VAL" --memory-swap "\$CONTAINER_MEM_VAL")
+          fi
+
+          # Run detached so we can stream logs and still get exit code
+          CID=\$(sudo docker run -d --name "${CONTAINER_NAME}" \
             --env-file "\$ENV_FILE" \
-            "${CONTAINER_IMAGE}"
+            "\${RUN_MEM_ARGS[@]}" \
+            "${CONTAINER_IMAGE}")
+          echo "Container ID: \$CID"
+
+          # Stream logs until exit, capture status
+          set +e
+          sudo docker logs -f "\$CID" &
+          LOGSPID=\$!
+          sudo docker wait "\$CID"
+          WAIT_STATUS=\$?
+          kill \$LOGSPID 2>/dev/null || true
+          set -e
+
+          # Inspect termination details
+          OOM=\$(sudo docker inspect -f '{{.State.OOMKilled}}' "\$CID")
+          EXIT=\$(sudo docker inspect -f '{{.State.ExitCode}}' "\$CID")
+          FINISHED=\$(sudo docker inspect -f '{{.State.FinishedAt}}' "\$CID")
+          echo "Container finished at \$FINISHED with exit \$EXIT (OOMKilled=\$OOM)"
+
+          echo "==== Recent kernel messages (OOM?) ===="
+          journalctl -k --since "-1h" | egrep -i 'oom|out of memory' || echo "No OOM messages in last hour."
+
+          # Fail the job if the container failed
+          if [ "\$EXIT" -ne 0 ]; then
+            echo "Container exit code: \$EXIT"
+            exit \$EXIT
+          fi
           EOF
 
       - name: Cleanup local artifacts
