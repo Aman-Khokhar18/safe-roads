@@ -3,7 +3,6 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
 from datetime import datetime
-from pathlib import Path
 
 load_dotenv()
 DB_DSN = os.getenv("DATABASE_URL")

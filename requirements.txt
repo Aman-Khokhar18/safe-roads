@@ -9,3 +9,4 @@ sqlparse
 tqdm
 scikit-learn
 uvicorn
+requests
