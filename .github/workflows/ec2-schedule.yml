@@ -18,6 +18,7 @@ jobs:
       EC2_USER: ${{ secrets.EC2_USER }}
       CONTAINER_IMAGE: ${{ secrets.CONTAINER_IMAGE }}
       CONTAINER_NAME: my-python-job
+      G_TOKEN: ${{ secrets.G_TOKEN}}
 
     steps:
       - name: Configure AWS via OIDC
