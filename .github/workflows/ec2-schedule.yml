@@ -2,7 +2,7 @@ name: Run GHCR image on EC2 (4h)
 
 on:
   schedule:
-    - cron: "0 */4 * * *"     # every 4 hours (UTC)
+    - cron: "0 */2 * * *"     # every 2 hours (UTC)
   workflow_dispatch: {}
 
 jobs:
