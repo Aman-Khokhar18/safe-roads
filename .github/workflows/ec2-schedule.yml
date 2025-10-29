@@ -1,3 +1,4 @@
+# .github/workflows/ec2-schedule.yml
 name: Run GHCR image on EC2 (4h)
 
 on:
@@ -12,6 +13,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     permissions:
       id-token: write
       contents: read
@@ -30,7 +32,7 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Ensure EC2 is running + get host
+      - name: Ensure EC2 is running + get host (wait for SSH)
         id: ec2
         shell: bash
         run: |
@@ -40,9 +42,25 @@ jobs:
             aws ec2 start-instances --instance-ids "$INSTANCE_ID" >/dev/null
             aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
           fi
+          # Wait for both AWS status checks (instance & system)
+          aws ec2 wait instance-status-ok --instance-ids "$INSTANCE_ID"
+
           HOST=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query 'Reservations[0].Instances[0].PublicDnsName' --output text)
           if [ -z "$HOST" ] || [ "$HOST" = "None" ]; then
             HOST=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+          fi
+
+          # Wait for SSH port to be open
+          READY=0
+          for i in {1..30}; do
+            if timeout 3 bash -c ">/dev/tcp/$HOST/22" 2>/dev/null; then
+              READY=1
+              break
+            fi
+            sleep 5
+          done
+          if [ "$READY" -ne 1 ]; then
+            echo "SSH port 22 not reachable on $HOST"; exit 1
           fi
           echo "host=$HOST" >> "$GITHUB_OUTPUT"
 
@@ -60,7 +78,7 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          cat > app.env <<EOF
+          cat > app.env <<'EOF'
           DATABASE_URL=${{ secrets.DATABASE_URL }}
           SAFE_ROADS_API=${{ secrets.SAFE_ROADS_API }}
           HTTP_TIMEOUT=30
@@ -71,29 +89,55 @@ jobs:
           # Presence check without printing the secret
           grep -n '^G_TOKEN=' app.env >/dev/null || { echo "G_TOKEN missing in app.env"; exit 1; }
 
-      - name: Copy app.env to EC2
+      - name: Copy app.env to EC2 (with keepalives)
         env:
           EC2_HOST: ${{ steps.ec2.outputs.host }}
         shell: bash
         run: |
           set -euo pipefail
-          scp -o StrictHostKeyChecking=no -i key.pem app.env "$EC2_USER@${EC2_HOST}:~/app.env"
+          SSH_OPTS="-o StrictHostKeyChecking=no -o IdentitiesOnly=yes \
+            -o ServerAliveInterval=15 -o ServerAliveCountMax=60 \
+            -o TCPKeepAlive=yes -o ConnectionAttempts=30 -o ConnectTimeout=10 \
+            -i key.pem"
+          # small retry loop for flaky first contact
+          for i in {1..5}; do
+            scp $SSH_OPTS app.env "$EC2_USER@${EC2_HOST}:~/app.env" && break || sleep 5
+          done
 
-      - name: SSH and run container
+      - name: SSH and run container (robust + noisy)
         env:
           EC2_HOST: ${{ steps.ec2.outputs.host }}
         shell: bash
         run: |
           set -euo pipefail
-          ssh -o StrictHostKeyChecking=no -i key.pem "$EC2_USER@${EC2_HOST}" bash -s <<EOF
+          SSH_OPTS="-o StrictHostKeyChecking=no -o IdentitiesOnly=yes \
+            -o ServerAliveInterval=15 -o ServerAliveCountMax=60 \
+            -o TCPKeepAlive=yes -o ConnectionAttempts=30 -o ConnectTimeout=10 \
+            -i key.pem"
+          ssh $SSH_OPTS "$EC2_USER@${EC2_HOST}" bash -se <<EOF
           set -euo pipefail
+
           ENV_FILE="\$HOME/app.env"
           test -f "\$ENV_FILE"
           grep -n '^G_TOKEN=' "\$ENV_FILE" >/dev/null || { echo "G_TOKEN missing in env file"; exit 1; }
 
+          # Ensure Docker exists and is running (Ubuntu/Debian & Amazon Linux 2)
+          if ! command -v docker >/dev/null 2>&1; then
+            if [ -f /etc/os-release ] && grep -qi ubuntu /etc/os-release; then
+              sudo apt-get update -y
+              sudo apt-get install -y docker.io
+            else
+              # Amazon Linux 2
+              sudo amazon-linux-extras install -y docker || sudo yum install -y docker
+            fi
+          fi
+          sudo systemctl enable --now docker || true
+          sudo docker version || { echo "Docker not ready"; exit 1; }
+
+          # Pull and run in foreground with unbuffered stdout to keep session active
           sudo docker pull "${CONTAINER_IMAGE}"
           sudo docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
-          sudo docker run --rm --name "${CONTAINER_NAME}" \
+          stdbuf -o0 sudo docker run --rm --name "${CONTAINER_NAME}" \
             --env-file "\$ENV_FILE" \
             "${CONTAINER_IMAGE}"
           EOF
