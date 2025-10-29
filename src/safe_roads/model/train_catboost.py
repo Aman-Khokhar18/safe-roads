@@ -23,7 +23,7 @@ def train():
     mlflow.set_tracking_uri("http://localhost:5000")
 
     # --- Data ---
-    data = next(data_loader("combined_dataset", chunksize=None))
+    data = next(data_loader("combined_dataset", chunksize=None, mode="train"))
 
     X_train, y_train, X_val, y_val, X_test, y_test = prepare_data(config, data)
 
@@ -38,13 +38,15 @@ def train():
         loss_function="Logloss",
         eval_metric="BrierScore",
         custom_metric=["PRAUC","AUC","Logloss"],
-        iterations=3000,
+        iterations=100,
         learning_rate=0.01,
         depth=7,
         random_seed=RANDOM_STATE,
         use_best_model=True,
         verbose=100,
-        class_weights={0: 1.0, 1: 1.0} 
+        class_weights={0: 1.0, 1: 1.0}, 
+        od_type="Iter",
+        od_wait=EARLY_STOPPING_ROUNDS, 
     )
 
     # ---- MLflow ----
@@ -54,23 +56,12 @@ def train():
         # Log small/metadata to MLflow
         mlflow.log_text(json.dumps(list(X_train.columns), indent=2), "features.json")
         params = model.get_params()
-        mlflow.log_params({
-            "loss_function": params.get("loss_function"),
-            "eval_metric": params.get("eval_metric"),
-            "custom_metric": ",".join(params.get("custom_metric") or []),
-            "iterations": params.get("iterations"),
-            "learning_rate": params.get("learning_rate"),
-            "depth": params.get("depth"),
-            "random_seed": params.get("random_seed"),
-            "class_weights": params.get("class_weights")
-        })
-        
+        mlflow.log_dict(params, f"catboost_params_{run_id}.json")        
         # Train
         model.fit(
             X_train, y_train,
             eval_set=(X_val, y_val),
             cat_features=cat_cols,
-            early_stopping_rounds=EARLY_STOPPING_ROUNDS
         )
 
         best_iter = model.get_best_iteration()
@@ -93,8 +84,6 @@ def train():
             "bss": bss
         })
 
-        mlflow.log_dict(model.get_all_params(), "artifacts/catboost_all_params.json")
-
         # ---------- Local save----------
         LOCAL_MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -106,8 +95,6 @@ def train():
         )
         meta = {
             "best_iteration": int(best_iter),
-            "class_names": model.get_param("class_names"),
-            "params": model.get_all_params(),
             "CATEGORICAL": config["CATEGORICAL"],
             "NUMERICAL":  config["NUMERICAL"],
             "BOOLEAN":    config["BOOLEAN"],
@@ -116,7 +103,7 @@ def train():
         }
         (LOCAL_MODEL_DIR / f"model_meta_{run_id}.json").write_text(json.dumps(meta, indent=2))
 
-        mlflow.log_artifacts(str(LOCAL_MODEL_DIR), artifact_path="catboost_model_local")
+        mlflow.log_artifacts(str(LOCAL_MODEL_DIR), artifact_path=f"catboost_model_{run_id}")
 
     print(f"Best iteration: {best_iter}")
     print(f"  AUC      : {auc:.4f}")

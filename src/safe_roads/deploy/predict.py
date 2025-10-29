@@ -17,6 +17,8 @@ from safe_roads.utils.mlutil import data_loader
 from safe_roads.utils.config import load_config, get_pg_url
 
 
+config = load_config("configs/app.yml")
+
 logger = logging.getLogger("safe_roads.predict")
 if not logger.handlers:
     logging.basicConfig(
@@ -48,6 +50,11 @@ def _scrub_jsonable(obj):
         return bool(obj)
     return obj
 
+def _feature_cols():
+    return list(config.get("CATEGORICAL", [])) + \
+           list(config.get("NUMERICAL", []))   + \
+           list(config.get("BOOLEAN", []))
+
 
 def _new_session_with_retries(total=5, backoff=0.5):
     retry = Retry(
@@ -65,7 +72,6 @@ def _new_session_with_retries(total=5, backoff=0.5):
 
 
 def predict():
-    config      = load_config("configs/app.yml")
     table_name  = config["INPUT_TABLE"]
     model_api   = config["SAFE_ROADS_API"]
     endpoint    = model_api.rstrip("/") + "/predict"
@@ -80,7 +86,7 @@ def predict():
     IF_EXISTS0 = "replace"
 
     # fixed total rows provided by you
-    TOTAL_ROWS = 3_159_825
+    TOTAL_ROWS = 2028019
 
     logger.info("Streaming data from table: %s (read_chunksize=%s)", table_name, read_chunksize)
     df_iter = data_loader(table_name, chunksize=read_chunksize, mode="predict")
@@ -94,8 +100,6 @@ def predict():
 
     dtype_map = {
         "h3": VARCHAR(32),
-        "parent_h3": VARCHAR(32),
-        "prediction": INTEGER(),
         "probability": DOUBLE_PRECISION(),
     }
 
@@ -110,19 +114,26 @@ def predict():
             continue
 
         # Ensure identifier columns exist
-        for col in ("h3", "parent_h3"):
-            if col not in chunk_df.columns:
-                chunk_df[col] = pd.NA
+        if "h3" not in chunk_df.columns:
+            chunk_df["h3"] = pd.NA
 
         # Clean infinities/NaNs early
         chunk_df.replace([np.inf, -np.inf], pd.NA, inplace=True)
-
+        
         rows_in_chunk = len(chunk_df)
         num_batches_in_chunk = math.ceil(rows_in_chunk / batch_size)
 
         for b in range(num_batches_in_chunk):
             start = b * batch_size
             end   = min(rows_in_chunk, (b + 1) * batch_size)
+
+            feat_cols = _feature_cols()
+            missing_feats = [c for c in feat_cols if c not in chunk_df.columns]
+            if missing_feats:
+                raise RuntimeError(f"Missing required feature columns: {missing_feats[:10]}...")
+            
+            batch_X = chunk_df.iloc[start:end][feat_cols].copy()
+            batch_X.replace([np.inf, -np.inf], pd.NA, inplace=True)
 
             batch_df = chunk_df.iloc[start:end].copy()
             if batch_df.empty:
@@ -131,7 +142,7 @@ def predict():
             batch_df.replace([np.inf, -np.inf], pd.NA, inplace=True)
 
             # JSON payload: scrub to plain Python + None
-            batch_records = batch_df.where(batch_df.notna(), None).to_dict(orient="records")
+            batch_records = batch_df.where(batch_X.notna(), None).to_dict(orient="records")
             payload = {"instances": _scrub_jsonable(batch_records)}
 
             # Call model
@@ -158,7 +169,6 @@ def predict():
 
             out_df = pd.DataFrame({
                 "h3": batch_df["h3"].astype("string"),
-                "parent_h3": batch_df["parent_h3"].astype("string"),
                 "probability": [float(p) for p in probs],
             })
 
@@ -179,7 +189,7 @@ def predict():
             pbar.update(wrote)  # advance by rows processed in this batch
 
             # Free memory
-            del out_df, batch_df, batch_records, probs, out
+            del out_df, batch_X, batch_df, batch_records, probs, out
             gc.collect()
 
     pbar.close()

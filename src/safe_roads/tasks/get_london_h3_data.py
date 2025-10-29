@@ -25,24 +25,15 @@ def get_borough_data() -> gpd.GeoDataFrame:
 def borough_to_h3(df, res: int) -> pd.DataFrame:
 
     rows = []
-    df['district'] = (
-    df['district']
-      .str.lower()
-      .str.replace(r'[^a-z0-9]+', '', regex=True) 
-      .replace({
-          'cityandcountyofthecityoflondon': 'cityoflondon',
-          'cityofwestminster': 'westminster'
-      })
-    )
-
-    for _, row in df[['district', 'geometry']].iterrows():
+    df.rename(columns={'district': 'Borough'}, inplace=True)
+    for _, row in df[['Borough', 'geometry']].iterrows():
         geom = row['geometry']
         if geom is None or geom.is_empty:
             continue
         cells = h3.geo_to_cells(geom, res)
-        rows.extend((row['district'].strip().lower(), h) for h in cells)
+        rows.extend((row['Borough'], h) for h in cells)
 
-    return pd.DataFrame(rows, columns=['district', 'h3'])
+    return pd.DataFrame(rows, columns=['Borough', 'h3'])
 
 
 @task(name="Load London Borough Data")
@@ -55,7 +46,7 @@ def load_borough_h3_data():
     gdf = get_borough_data()
 
     logger.info("Converting to H3 cells")
-    df = borough_to_h3(gdf, 10)
+    df = borough_to_h3(gdf, 12)
 
     logger.info("Loading table into database")
     df_to_pg(df, 'london_h3', url, if_exists='replace')

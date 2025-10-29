@@ -9,6 +9,7 @@ def read_sql(name: str) -> str:
         return p.read_text(encoding="utf-8")
     except FileNotFoundError as e:
         raise FileNotFoundError(f"SQL resource not found: {p}") from e
+    
 
 def run_sql(db_url: str, name: str) -> None:
     engine = create_engine(db_url)

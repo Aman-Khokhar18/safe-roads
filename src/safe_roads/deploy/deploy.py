@@ -3,6 +3,7 @@ from safe_roads.utils.data import free_memory
 from safe_roads.deploy.transform_live_data import transform_data
 from safe_roads.deploy.predict import predict
 from safe_roads.deploy.fetch_weather_hourly import get_hourly_weather
+from safe_roads.deploy.commit_to_git import commit_to_git
 
 load_dotenv()
 
@@ -19,6 +20,11 @@ def hourly_pipeline():
 
     try:
         predict()
+    finally:
+        free_memory()
+
+    try:
+        commit_to_git()
     finally:
         free_memory()
 

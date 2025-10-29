@@ -16,11 +16,14 @@ def transform_data() -> None:
     url = get_pg_url()
 
     logger.info("Running SQL queries")
-    if _table_exists(url=url, table="osm_data_live_h3_enriched"):
-        run_sql(url, "clean_osm_data_live.sql")
-        logger.info("SQL transformation complete.")
+    if _table_exists(url=url, table="osm_deploy_latest"):
+        run_sql(url, "add_weather_live.sql")
+        logger.info("Added live weather data")
+
+        run_sql(url, "cyclic_time_features.sql")
+        logger.info("Created time features")
     else:
-        msg = "osm_data_live_h3_enriched table not found in database"
+        msg = "OSM latest data table not found in database"
         logger.error(msg)
         raise FileNotFoundError(msg)
 

@@ -14,17 +14,13 @@ from sklearn.metrics import (
 from prefect import flow
 import mlflow
 from catboost import CatBoostClassifier
-
-# Optional: if you prefer MLflow's CatBoost flavor
-# import mlflow.catboost
-
 from safe_roads.utils.mlutil import data_loader, prepare_data
 from safe_roads.utils.config import load_config
 
 
 def _maybe_load_hopt_config():
     try:
-        h = load_config("configs/hyperopt.yml")
+        h = load_config("configs/hyperopt_catboost.yml")
     except Exception:
         h = {}
     # Added SAVE_TRIAL_MODELS knob (default False)
@@ -90,8 +86,6 @@ def tune_depth_and_class_weights(
             f"_wpos{suggested['class_weights'][1]:.4f}"
         )
 
-        # Start nested MLflow run for each trial
-        # NOTE: Do not call mlflow.set_experiment() here; do it outside in train()
         with mlflow.start_run(run_name=run_name, nested=True):
             # Helpful tags & params for filtering/search in the UI
             mlflow.set_tags({

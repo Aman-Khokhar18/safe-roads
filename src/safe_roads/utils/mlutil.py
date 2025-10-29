@@ -7,63 +7,52 @@ import numpy as np
 from safe_roads.utils.config import get_pg_url, load_config
 from sklearn.model_selection import train_test_split
 
+config = load_config("configs/train.yml")
 
-def data_loader(table, chunksize: int | None = None, mode: str | None = 'train'):
-
-    mode = mode.lower()
-
-    if mode not in {"train", "predict"}:
-        raise ValueError("mode must be 'train' or 'predict'")
+def data_loader(table, chunksize: int | None = None, mode: str | None = None):
 
     url = get_pg_url()
     engine = create_engine(url, pool_pre_ping=True)
-    order_by = "h3, year, month, day, hour"
+    order_by = "h3, year, dt_month, dt_day, dt_hour"
 
-    collision = "cd.collision," if mode == "train" else ""
+    collision_target = ",cd.collision AS collision_target" if mode == "train" else ""
+
     query = f"""
         SELECT
-            cd.h3, cd.parent_h3, cd.highway, cd.lanes, cd.width, cd.surface, cd.smoothness, cd.oneway, cd.junction,
-            cd.traffic_signals, cd.traffic_calming, cd.crossing, cd.sidewalk, cd.cycleway, cd.bicycle, cd.lit,
-            cd.access, cd.vehicle, cd.hgv, cd.psv, cd.bus, cd.overtaking, cd.bridge, cd.tunnel, cd.layer, cd.incline,
-            cd.barrier, cd.amenity, cd.year, cd.month, cd.day, cd.hour, cd.is_weekend, cd.road_class3, cd.borough,
-            cd.maxspeed_mph, cd.is_junction, cd.is_turn, cd.junction_degree, cd.temp, cd.dwpt, cd.rhum, cd.prcp,
-            cd.snow, cd.wdir, cd.wspd, cd.wpgt, cd.pres, cd.tsun, cd.coco, cd.hour_sin, cd.hour_cos, cd.dow_sin, cd.dow_cos,
-            cd.dom_sin, cd.dom_cos, cd.month_sin, cd.month_cos, cd.traffic_light_count, cd.crossing_count,
-            cd.motorway_other_count, cd.cycleway_count, {collision}
+            cd.*
 
-            COALESCE(lyw.h3_collisions_last_year, 0)  AS h3_collisions_last_year,
-            COALESCE(lyw.n1_collisions_last_year, 0)  AS n1_collisions_last_year,
-            COALESCE(lyw.n2_collisions_last_year, 0)  AS n2_collisions_last_year,
-            COALESCE(lyw.n3_collisions_last_year, 0)  AS n3_collisions_last_year,
-            COALESCE(lyw.n4_collisions_last_year, 0)  AS n4_collisions_last_year,
-            COALESCE(lyw.n5_collisions_last_year, 0)  AS n5_collisions_last_year,
-            COALESCE(lyw.n6_collisions_last_year, 0)  AS n6_collisions_last_year,
-            COALESCE(lyw.parent_collisions_last_year, 0) AS parent_collisions_last_year
+            {collision_target}
         FROM {table} AS cd
-        LEFT JOIN public.h3_last_year_collisions_wide AS lyw
-        ON lyw.h3 = cd.h3
-        AND lyw.year = cd.year
         ORDER BY {order_by}
     """
-
-
     with engine.connect().execution_options(stream_results=True) as conn:
-        it = pd.read_sql_query(text(query), conn, chunksize=chunksize)
-        if isinstance(it, pd.DataFrame):
-            yield it
+        if chunksize is None:
+            df = pd.read_sql_query(text(query), conn)  
+            yield df
         else:
-            for chunk in it:
+            for chunk in pd.read_sql_query(text(query), conn, chunksize=chunksize):
                 yield chunk
                 
 
-def ensure_types(config, data):
+def ensure_types(config, data, model_type: str):
+
+    if model_type not in ["xgboost", "catboost"]:
+        raise ValueError(f"Unsupported model type: {model_type}")
+    
     NUMERICAL   = config["NUMERICAL"]
     CATEGORICAL = config["CATEGORICAL"]
     BOOLEAN     = config["BOOLEAN"]
 
-    for col in CATEGORICAL:
-        if col in data.columns: 
-            data[col] = data[col].astype("string").fillna("__MISSING__")
+    if model_type == "xgboost":
+        for col in CATEGORICAL:
+            if col in data.columns: 
+                data[col] = data[col].astype("category")
+
+    elif model_type == "catboost":
+        for col in CATEGORICAL:
+            if col in data.columns:
+                data[col] = data[col].astype("string").fillna("__MISSING__")
+                
     for col in BOOLEAN:
         if col in data.columns and pd.api.types.is_bool_dtype(data[col]):
             data[col] = data[col].astype("int8")
@@ -73,45 +62,37 @@ def ensure_types(config, data):
             data[col] = pd.to_numeric(data[col], errors="coerce")
 
 
-
-def prepare_data(config: dict, data: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series, pd.DataFrame, pd.Series]:
-    RANDOM_STATE = config["RANDOM_STATE"]
-    TEST_SIZE    = config["TEST_SIZE"]
-    VAL_SIZE     = config["VAL_SIZE"]
-    TARGET       = config["TARGET"]
-
+def prepare_data(config: dict, data: pd.DataFrame):
+    TARGET      = config["TARGET"]
     NUMERICAL   = config["NUMERICAL"]
     CATEGORICAL = config["CATEGORICAL"]
     BOOLEAN     = config["BOOLEAN"]
+    MODEL       = config["MODEL"]
     features    = NUMERICAL + CATEGORICAL + BOOLEAN
 
-    df = data.copy()
-    ensure_types(config, df)
+    if "dt_year" not in data.columns:
+        raise ValueError("Need 'year' column for year-based split.")
 
-    X = df.loc[:, features].copy()
-    y = df.loc[:, TARGET].copy()
+    ensure_types(config, data, MODEL)
 
-    # Use stratification if classification labels are available (>=2 classes)
-    stratify_main = y if y.nunique() > 1 else None
+    spl = config["SPLIT"]
+    train_before = int(spl["TRAIN_BEFORE_YEAR"])
+    test_year    = int(spl["TEST_YEAR"])
+    val_year     = int(spl.get("VAL_YEAR", train_before - 1))
 
-    X_temp, X_test, y_temp, y_test = train_test_split(
-        X, y,
-        test_size=TEST_SIZE,
-        random_state=RANDOM_STATE,
-        stratify=stratify_main
-    )
+    train_mask = (data["dt_year"] < train_before) & (data["dt_year"] != val_year)
+    val_mask   = (data["dt_year"] == val_year)
+    test_mask  = (data["dt_year"] == test_year)
 
-    val_ratio = VAL_SIZE / (1 - TEST_SIZE)
-    stratify_val = y_temp if (stratify_main is not None and y_temp.nunique() > 1) else None
+    train_df = data.loc[train_mask].copy()
+    val_df   = data.loc[val_mask].copy()
+    test_df  = data.loc[test_mask].copy()
 
-    X_train, X_val, y_train, y_val = train_test_split(
-        X_temp, y_temp,
-        test_size=val_ratio,
-        random_state=RANDOM_STATE,
-        stratify=stratify_val
-    )
-
+    X_train, y_train = train_df[features], train_df[TARGET]
+    X_val,   y_val   = val_df[features],   val_df[TARGET]
+    X_test,  y_test  = test_df[features],  test_df[TARGET]
     return X_train, y_train, X_val, y_val, X_test, y_test
+
 
 
 

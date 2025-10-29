@@ -1,10 +1,65 @@
 SAFE_ROADS_API: "https://AmanKhokhar-safe-roads-catboost.hf.space"
 SAFE_ROADS_API_TOKEN: ""
 
-INPUT_TABLE: "roads_features"
+INPUT_TABLE: "osm_deploy_latest_w"
 OUT_TABLE: "prediction"
-BATCH_SIZE: 10000  
-READ_CHUNKSIZE: 10000
-WRITE_CHUNKSIZE: 10000
+BATCH_SIZE: 2000  
+READ_CHUNKSIZE: 2000
+WRITE_CHUNKSIZE: 2000
 HTTP_TIMEOUT: 120
 HTTP_RETRY: 3
+
+CATEGORICAL : [
+    "borough",
+]
+
+NUMERICAL : [
+    # time & calendar
+    "dt_year", "dt_month", "dt_day", "dt_hour",
+    "dt_is_weekend", "dt_is_weekday",
+    "hour_sin", "hour_cos", "dow_sin", "dow_cos",
+    "dom_sin", "dom_cos", "month_sin", "month_cos",
+
+    # weather
+    "temp","dwpt","rhum","prcp","snow","wdir","wspd","wpgt","pres","tsun","coco",
+
+    "lanes_num_avg","lanes_num_max",
+    "width_m_avg","width_m_max",
+    "smoothness_score_avg",
+    "maxspeed_mph_avg","maxspeed_mph_max",
+
+    "cnt_is_primary","cnt_is_secondary","cnt_is_tertiary",
+    "cnt_is_residential","cnt_is_service","cnt_is_track_or_path",
+    "cnt_oneway_forward","cnt_oneway_bidirectional","cnt_oneway_reverse",
+    "cnt_sidewalk_both","cnt_sidewalk_left","cnt_sidewalk_right","cnt_sidewalk_none",
+    "cnt_bicycle_yes","cnt_bicycle_designated","cnt_bicycle_permissive","cnt_bicycle_no",
+    "cnt_access_permissive","cnt_access_destination","cnt_access_private","cnt_access_no",
+    "cnt_is_bridge","cnt_is_tunnel","cnt_has_barrier","cnt_has_amenity","cnt_has_bus_stop",
+    "cnt_has_mini_roundabout","cnt_has_speed_camera",
+
+    # share_* proportions
+    "share_is_motorway","share_is_trunk","share_is_primary","share_is_secondary",
+    "share_is_tertiary","share_is_residential","share_is_service",
+    "share_is_track_or_path","share_is_foot_or_ped",
+
+    # r11 aggregates available in combined_dataset
+    "r11_mean_maxspeed_mph","r11_mean_lanes","r11_mean_width_m","r11_mean_smoothness",
+    "r11_mean_cnt_has_signals","r11_mean_cnt_has_crossing","r11_mean_cnt_speed_camera",
+    "r11_mean_cnt_bus_stop","r11_mean_cnt_amenity",
+    "r11_mean_cnt_is_primary","r11_mean_cnt_is_secondary","r11_mean_cnt_is_tertiary",
+    "r11_mean_cnt_is_residential","r11_mean_cnt_is_service","r11_mean_cnt_is_track_or_path",
+    "r11_share_is_primary","r11_share_is_secondary","r11_share_is_tertiary",
+    "r11_share_is_residential","r11_share_is_service","r11_share_is_track_or_path",
+    "r11_share_oneway_forward","r11_share_oneway_bidirectional","r11_share_oneway_reverse",
+    "r11_mean_cnt_sidewalk_none","r11_mean_cnt_sidewalk_both",
+    "r11_mean_cnt_cycle_infra","r11_mean_cnt_cycle_lane","r11_mean_cnt_cycle_track",
+
+    # graph-ish
+    "junction_degree",
+]
+
+# BOOLEAN: keep as booleans (you can cast to 0/1 in your pipeline if needed)
+BOOLEAN : [
+    "is_junction",
+    "is_turn",
+]
