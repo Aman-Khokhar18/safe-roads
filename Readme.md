@@ -2,253 +2,273 @@
 
 Predict the probability of a road collision at any location and time in Greater London by combining ten years of Transport for London collision records with OpenStreetMap history and historical weather. This repository covers data collection, H3 based feature engineering, model training with XGBoost, experiment tracking, and end to end deployment.
 
-- Live demo: https://safe-roads-london.onrender.com/
-- Model repo: https://huggingface.co/AmanKhokhar/safe-roads/tree/main
-- API on Hugging Face Spaces: https://huggingface.co/spaces/AmanKhokhar/safe-roads-catboost  (the name still says catboost from early experiments; the final model uses XGBoost)
-- Web app repo: https://github.com/Aman-Khokhar18/safe-roads-london
-- Main repo: https://github.com/Aman-Khokhar18/safe-roads
+* Live demo: [https://safe-roads-london.onrender.com/](https://safe-roads-london.onrender.com/)
+* Model repo: [https://huggingface.co/AmanKhokhar/safe-roads/tree/main](https://huggingface.co/AmanKhokhar/safe-roads/tree/main)
+* API on Hugging Face Spaces: [https://huggingface.co/spaces/AmanKhokhar/safe-roads-catboost](https://huggingface.co/spaces/AmanKhokhar/safe-roads-catboost)  (the name still says catboost from early experiments; the final model uses XGBoost)
+* Web app repo: [https://github.com/Aman-Khokhar18/safe-roads-london](https://github.com/Aman-Khokhar18/safe-roads-london)
+* Main repo: [https://github.com/Aman-Khokhar18/safe-roads](https://github.com/Aman-Khokhar18/safe-roads)
 
 ---
 
-## Table of contents
+<p align="center">
+  <img src="https://pouch.jumpshare.com/preview/r4gnfsAuzVG1KmeXpiiofCjBJtfWhGDVDFDwck5A0Wn0twPCH0RJv1fyrDEisqeSiZb85cHQH2kyR2s6F8z0eT0NrL4qcEtP0zpj-Ewfwug" alt="Safe Roads London demo" width="900"/>
+  <br><em>Add <code>docs/demo.gif</code> (screen capture of the map, time slider, borough filter, and tooltip) to display the live demo here.</em>
+</p>
 
-- Scope
-- Data sources and storage
-- Why H3 and how it is used
-- OSM history with ohsome
-- Weather with Meteostat
-- Data modeling
-- Feature engineering
-- Modeling
-- Experiment tracking and optimization
-- Results
-- ETL and orchestration
-- Training
-- Deployment
-- Reports and figures
-- Cost choices
-- Limitations
-- Future work and use cases
-- Getting started
-- Architecture
-- Acknowledgements
+<a id="table-of-contents"></a>
 
----
+## 🔗 Table of contents
 
-## Scope
-
-- Build a spatiotemporal risk model that outputs the probability of a collision for a given hex cell and timestamp.
-- Cover 2015 to 2024 using TfL road safety data across Greater London.
-- Enrich collision points with street network context from historical OSM, weather from Meteostat, and temporal signals.
-- Aggregate everything on H3 hexagons so the model learns neighborhood level conditions rather than only point coordinates.
-- Serve predictions with a FastAPI service on Hugging Face Spaces, store results in PostgreSQL, and visualize on the web with Leaflet.
+* [Scope](#scope)
+* [Data sources and storage](#data-sources-and-storage)
+* [Why H3 and how it is used](#why-h3-and-how-it-is-used)
+* [OSM history with ohsome](#osm-history-with-ohsome)
+* [Weather with Meteostat](#weather-with-meteostat)
+* [Data modeling](#data-modeling)
+* [Feature engineering](#feature-engineering)
+* [Modeling](#modeling)
+* [Experiment tracking and optimization](#experiment-tracking-and-optimization)
+* [Results](#results)
+* [ETL and orchestration](#etl-and-orchestration)
+* [Training](#training)
+* [Deployment](#deployment)
+* [Reports and figures](#reports-and-figures)
+* [Cost choices](#cost-choices)
+* [Limitations](#limitations)
+* [Future work and use cases](#future-work-and-use-cases)
+* [Getting started](#getting-started)
+* [Architecture](#architecture)
+* [Acknowledgements](#acknowledgements)
 
 ---
 
-## Data sources and storage
+<a id="scope"></a>
+
+## 🎯 Scope
+
+* Build a spatiotemporal risk model that outputs the probability of a collision for a given hex cell and timestamp.
+* Cover 2015 to 2024 using TfL road safety data across Greater London.
+* Enrich collision points with street network context from historical OSM, weather from Meteostat, and temporal signals.
+* Aggregate everything on H3 hexagons so the model learns neighborhood level conditions rather than only point coordinates.
+* Serve predictions with a FastAPI service on Hugging Face Spaces, store results in PostgreSQL, and visualize on the web with Leaflet.
+
+---
+
+<a id="data-sources-and-storage"></a>
+
+## 📦 Data sources and storage
 
 ### Sources
 
-1) Collisions  
-   Transport for London Road Safety Data  
-   https://tfl.gov.uk/corporate/publications-and-reports/road-safety  
+1. Collisions
+   Transport for London Road Safety Data
+   [https://tfl.gov.uk/corporate/publications-and-reports/road-safety](https://tfl.gov.uk/corporate/publications-and-reports/road-safety)
    Years: 2015 to 2024.
 
-2) Street and road context  
+2. Street and road context
    OpenStreetMap via the ohsome API to fetch historical snapshots that match each collision timestamp.
 
-3) Weather  
+3. Weather
    Meteostat for historical hourly and daily weather aligned to each record.
 
 ### Storage
 
-- All raw and processed tables live in PostgreSQL on AWS RDS.
-- The ETL normalizes schema, converts coordinates, assigns H3, and records provenance.
+* All raw and processed tables live in PostgreSQL on AWS RDS.
+* The ETL normalizes schema, converts coordinates, assigns H3, and records provenance.
 
 ---
 
-## Why H3 and how it is used
+<a id="why-h3-and-how-it-is-used"></a>
+
+## 🧭 Why H3 and how it is used
 
 The TfL dataset includes precise British National Grid easting and northing per collision.
 
 Steps:
-1) Convert easting and northing to latitude and longitude.  
-2) Map lat and lon to H3 cells at a chosen resolution.  
-3) Use hex IDs to join collisions with OSM features and weather in a consistent spatial frame.
+
+1. Convert easting and northing to latitude and longitude.
+2. Map lat and lon to H3 cells at a chosen resolution.
+3. Use hex IDs to join collisions with OSM features and weather in a consistent spatial frame.
 
 Why H3 helps:
-- Local context  
+
+* Local context
   A single point rarely explains a collision. H3 lifts a point into its surrounding area, which captures street layout, controls, speed limits, and pedestrian or cycling infrastructure. This provides richer environmental context.
-- Uniform tiling and hierarchy  
+* Uniform tiling and hierarchy
   Hex cells form a global grid with consistent neighborhood relationships. You can roll up or drill down by resolution, build k rings, and compute neighbor statistics.
-- Multi scale analysis  
+* Multi scale analysis
   Resolution can be tuned to the density of London roads. This pipeline also computes neighbor summaries at resolution 11 for stability and smoother signals.
-- Time alignment  
+* Time alignment
   Each record is hex plus timestamp, which makes it straightforward to join the correct historical OSM snapshot and weather observation.
-- Aggregation friendly  
+* Aggregation friendly
   Hex bins support counts, shares, means, and graph summaries. This reduces noise and lets the model learn from area level patterns instead of only raw points.
 
-![H3 hex overlay with sample collisions](https://i.ibb.co/VpJyQDV7/h3.png)
+<p align="center">
+  <img src="https://i.ibb.co/WWw3Phvc/h3-hex-explain.png" alt="H3 hex overlay with sample collisions" width="820"/>
+</p>
 
 ---
 
-## OSM history with ohsome
+<a id="osm-history-with-ohsome"></a>
 
-- Fetch historical OSM features that exist at or before each collision time, not only the latest map.
-- Extract tags for ways and nodes that matter for safety:
-  - highway class, maxspeed, lanes, width, surface, smoothness
-  - one way flags, sidewalks, cycle lanes or tracks
-  - bridges, tunnels, barriers, amenities
-  - crossings, traffic signals, bus stops, speed cameras, mini roundabouts
-- Aggregate per H3 cell and align to the timestamp.
+## 🗺️ OSM history with ohsome
 
----
+* Fetch historical OSM features that exist at or before each collision time, not only the latest map.
+* Extract tags for ways and nodes that matter for safety:
 
-## Weather with Meteostat
-
-- Pull weather observations aligned to each collision time and also for negative samples.
-- Features include temperature, dew point, relative humidity, precipitation, snowfall, wind direction and speed, gusts, pressure, sunshine duration, and weather code.
+  * highway class, maxspeed, lanes, width, surface, smoothness
+  * one way flags, sidewalks, cycle lanes or tracks
+  * bridges, tunnels, barriers, amenities
+  * crossings, traffic signals, bus stops, speed cameras, mini roundabouts
+* Aggregate per H3 cell and align to the timestamp.
 
 ---
 
-## Data modeling
+<a id="weather-with-meteostat"></a>
 
-- Target  
+## 🌤️ Weather with Meteostat
+
+* Pull weather observations aligned to each collision time and also for negative samples.
+* Features include temperature, dew point, relative humidity, precipitation, snowfall, wind direction and speed, gusts, pressure, sunshine duration, and weather code.
+
+---
+
+<a id="data-modeling"></a>
+
+## 🧩 Data modeling
+
+* Target
   Binary label indicating whether a collision occurred for a hex cell and timestamp pair.
 
-- Negative sampling  
+* Negative sampling
   Collisions are rare. src/safe_roads/flows/ingest_negativedata.py creates realistic negatives by sampling times and hex cells without recorded collisions. The sampling preserves temporal structure to avoid easy negatives that inflate scores.
 
-- Spatiotemporal joins  
+* Spatiotemporal joins
   Each hex time record joins to OSM features from the correct historical snapshot and the matching weather observation. This avoids look ahead bias.
 
-- Neighborhood smoothing  
+* Neighborhood smoothing
   Additional stability comes from neighbor aggregates at H3 resolution 11, which reduce noise in sparse areas.
 
-- Schema overview  
+* Schema overview
   Suggested tables and key columns:
-  - tfl_collisions: collision_id, occurred_at, easting, northing, lat, lon, h3
-  - osm_features_h3: h3, valid_at, counts, shares, means
-  - weather_observations: ts, station fields, and per hour metrics
-  - ml_dataset: h3, ts, engineered features, label
-  - predictions: h3, ts, score, model_version
 
-- Validation  
+  * tfl_collisions: collision_id, occurred_at, easting, northing, lat, lon, h3
+  * osm_features_h3: h3, valid_at, counts, shares, means
+  * weather_observations: ts, station fields, and per hour metrics
+  * ml_dataset: h3, ts, engineered features, label
+  * predictions: h3, ts, score, model_version
+
+* Validation
   Time based splits are used for evaluation. Spatial cross validation by borough or by H3 partitions is recommended when changing resolutions or adding new coverage.
 
 ---
 
-## Feature engineering
+<a id="feature-engineering"></a>
 
-Time and calendar
-- dt_year, dt_month, dt_day, dt_hour
-- dt_is_weekend, dt_is_weekday
-- cyclic encodings: hour_sin, hour_cos, dow_sin, dow_cos, dom_sin, dom_cos, month_sin, month_cos
+## 🧪 Feature engineering
 
-Weather
-- temp, dwpt, rhum, prcp, snow, wdir, wspd, wpgt, pres, tsun, coco
+**Overview (at a glance)**
 
-OSM derived numeric aggregates
-- Capacity and speed context  
-  lanes_num_avg, lanes_num_max, width_m_avg, width_m_max, smoothness_score_avg, maxspeed_mph_avg, maxspeed_mph_max
-- Counts of key attributes in the hex  
-  cnt_is_primary, cnt_is_secondary, cnt_is_tertiary, cnt_is_residential, cnt_is_service, cnt_is_track_or_path
-- One way and sidewalks  
-  cnt_oneway_forward, cnt_oneway_bidirectional, cnt_oneway_reverse, cnt_sidewalk_both, cnt_sidewalk_left, cnt_sidewalk_right, cnt_sidewalk_none
-- Cycling and access  
-  cnt_bicycle_yes, cnt_bicycle_designated, cnt_bicycle_permissive, cnt_bicycle_no, cnt_access_permissive, cnt_access_destination, cnt_access_private, cnt_access_no
-- Safety related infrastructure  
-  cnt_is_bridge, cnt_is_tunnel, cnt_has_barrier, cnt_has_amenity, cnt_has_bus_stop, cnt_has_mini_roundabout, cnt_has_speed_camera
-
-OSM shares by class
-- share_is_motorway, share_is_trunk, share_is_primary, share_is_secondary, share_is_tertiary, share_is_residential, share_is_service, share_is_track_or_path, share_is_foot_or_ped
-
-r11 aggregates
-- r11_mean_maxspeed_mph, r11_mean_lanes, r11_mean_width_m, r11_mean_smoothness
-- r11_mean_cnt_has_signals, r11_mean_cnt_has_crossing, r11_mean_cnt_speed_camera, r11_mean_cnt_bus_stop, r11_mean_cnt_amenity
-- r11_mean_cnt_is_primary, r11_mean_cnt_is_secondary, r11_mean_cnt_is_tertiary, r11_mean_cnt_is_residential, r11_mean_cnt_is_service, r11_mean_cnt_is_track_or_path
-- r11_share_oneway_forward, r11_share_oneway_bidirectional, r11_share_oneway_reverse
-- r11_mean_cnt_sidewalk_none, r11_mean_cnt_sidewalk_both, r11_mean_cnt_cycle_infra, r11_mean_cnt_cycle_lane, r11_mean_cnt_cycle_track
-
-Graph features
-- junction_degree approximates how connected a hex is in the road graph.
-
-Boolean flags
-- is_junction, is_turn  
-  Kept as booleans in the schema and can be cast to integers in the pipeline.
+| Group                  | Examples                                                                                                                                                                                   |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Time and calendar      | dt_year, dt_month, dt_day, dt_hour, dt_is_weekend, dt_is_weekday; cyclic: hour_sin/cos, dow_sin/cos, dom_sin/cos, month_sin/cos                                                            |
+| Weather                | temp, dwpt, rhum, prcp, snow, wdir, wspd, wpgt, pres, tsun, coco                                                                                                                           |
+| OSM numeric aggregates | lanes_num_avg/max, width_m_avg/max, smoothness_score_avg, maxspeed_mph_avg/max                                                                                                             |
+| OSM counts             | cnt_is_primary/secondary/tertiary/residential/service/track_or_path                                                                                                                        |
+| One way and sidewalks  | cnt_oneway_forward/bidirectional/reverse; cnt_sidewalk_both/left/right/none                                                                                                                |
+| Cycling and access     | cnt_bicycle_yes/designated/permissive/no; cnt_access_permissive/destination/private/no                                                                                                     |
+| Safety infrastructure  | cnt_is_bridge/tunnel; cnt_has_barrier/amenity/bus_stop/mini_roundabout/speed_camera                                                                                                        |
+| OSM shares by class    | share_is_motorway/trunk/primary/secondary/tertiary/residential/service/track_or_path/foot_or_ped                                                                                           |
+| r11 aggregates         | r11_mean_* (maxspeed_mph, lanes, width_m, smoothness); r11_mean_cnt_* (signals, crossings, cameras, bus stops, amenity); r11_share_oneway_*; r11_mean_cnt_sidewalk_*, r11_mean_cnt_cycle_* |
+| Graph                  | junction_degree                                                                                                                                                                            |
+| Flags                  | is_junction, is_turn                                                                                                                                                                       |
 
 ---
 
-## Modeling
+<a id="modeling"></a>
 
-Algorithm: XGBoost  
-Objective: binary:logistic  
-Eval metric: logloss  
+## 🧠 Modeling
+
+Algorithm: XGBoost
+Objective: binary:logistic
+Eval metric: logloss
 Hardware: device="cuda" when available
 
 Key parameters and intent:
-- learning_rate=0.02 with n_estimators=15000 and early_stopping_rounds=20  
+
+* learning_rate=0.02 with n_estimators=15000 and early_stopping_rounds=20
   Many small steps with early stopping to prevent overfitting.
-- max_depth=6 and min_child_weight=2  
+* max_depth=6 and min_child_weight=2
   Control tree complexity and reduce variance.
-- subsample=0.8 and colsample_bytree=0.8  
+* subsample=0.8 and colsample_bytree=0.8
   Stochasticity to improve generalization.
-- tree_method="hist"  
+* tree_method="hist"
   Fast histogram based training.
-- reg_lambda=1.0  
+* reg_lambda=1.0
   L2 regularization for stability.
 
 Training script path:
-- src/saferoads/model/train_xgboost
+
+* src/saferoads/model/train_xgboost
 
 ---
 
-## Experiment tracking and optimization
+<a id="experiment-tracking-and-optimization"></a>
 
-- MLflow  
+## 🔬 Experiment tracking and optimization
+
+* MLflow
   Logs parameters, metrics, models, and artifacts. Each run records dataset slice, H3 resolution, feature set, and training metadata.
 
-- Hyperopt  
+* Hyperopt
   Bayesian hyperparameter search over learning rate, depth, min child weight, and subsampling. Hyperopt runs are tracked in MLflow.
 
 ---
 
-## Results
+<a id="results"></a>
 
-| Metric | Value |
-|-------|------:|
-| AUC | 0.9896938971323956 |
-| PRAUC | 0.9221513692370529 |
-| LogLoss | 0.03291765577176357 |
-| Brier | 0.007874666076258969 |
-| Brier Skill Score | 0.7920958585742299 |
+## 📈 Results
 
-![Confusion Matrix](https://i.ibb.co/B5p2tNkG/confusion-matrix.png)
+| Metric            |                Value |
+| ----------------- | -------------------: |
+| AUC               |   0.9896938971323956 |
+| PRAUC             |   0.9221513692370529 |
+| LogLoss           |  0.03291765577176357 |
+| Brier             | 0.007874666076258969 |
+| Brier Skill Score |   0.7920958585742299 |
 
+<p align="center">
+  <img src="https://i.ibb.co/B5p2tNkG/confusion-matrix.png" alt="Confusion Matrix" width="620"/>
+</p>
+
+<p align="center">
+  <img src="https://i.ibb.co/vxfFbB2q/roc-curve.png" alt="ROC Curve" width="620"/>
+</p>
 
 Interpretation:
-- AUC near 1 indicates strong rank ordering of risky versus non risky cases.
-- PRAUC is high, which helps when positives are rare.
-- Low LogLoss and Brier indicate well calibrated probabilities.
-- Brier Skill Score around 0.79 shows a large improvement over a climatology baseline.
 
-![ROC Curve](https://ibb.co/LzBFMP4R)
-
-
+* AUC near 1 indicates strong rank ordering of risky versus non risky cases.
+* PRAUC is high, which helps when positives are rare.
+* Low LogLoss and Brier indicate well calibrated probabilities.
+* Brier Skill Score around 0.79 shows a large improvement over a climatology baseline.
 
 ---
 
-## ETL and orchestration
+<a id="etl-and-orchestration"></a>
+
+## ⚙️ ETL and orchestration
 
 A full ETL pipeline orchestrated with Prefect. I did not use Prefect scheduled deployments because cron lives in GitHub Actions for transparency.
 
 Flows
-- src/safe_roads/flows/ingest_collisiondata.py  
+
+* src/safe_roads/flows/ingest_collisiondata.py
   Ingest TfL collisions, convert coordinates, assign H3, write to Postgres.
-- src/safe_roads/flows/ingest_negativedata.py  
+* src/safe_roads/flows/ingest_negativedata.py
   Create negative samples for training by sampling times and hex cells without recorded collisions.
 
 Run flows locally
+
 ```bash
 - collision data  
     python src/safe_roads/flows/ingest_collisiondata.py --years 2015 2024 --h3-res 11
@@ -279,105 +299,132 @@ GitHub Actions schedule example
           - name: Rebuild training dataset if needed  
             run: python etl/build_dataset.py --incremental
 ```
+
 ---
 
-## Training
+<a id="training"></a>
+
+## 🏋️ Training
 
 Run training
+
 ```bash
 - python src/saferoads/model/train_xgboost --config configs/xgb.yaml --mlflow-uri sqlite:///mlruns.db
 ```
+
 ---
 
-## Deployment
+<a id="deployment"></a>
+
+## 🚀 Deployment
 
 Serving
-- Model artifacts are versioned on Hugging Face  
-  https://huggingface.co/AmanKhokhar/safe-roads/tree/main
-- FastAPI application exposes prediction endpoints on Hugging Face Spaces  
-  https://huggingface.co/spaces/AmanKhokhar/safe-roads-catboost  (name retained from early experiments; model is XGBoost)
+
+* Model artifacts are versioned on Hugging Face
+  [https://huggingface.co/AmanKhokhar/safe-roads/tree/main](https://huggingface.co/AmanKhokhar/safe-roads/tree/main)
+* FastAPI application exposes prediction endpoints on Hugging Face Spaces
+  [https://huggingface.co/spaces/AmanKhokhar/safe-roads-catboost](https://huggingface.co/spaces/AmanKhokhar/safe-roads-catboost)  (name retained from early experiments; model is XGBoost)
 
 Infra and packaging
-- Compute: AWS EC2 free tier for batch and maintenance jobs.
-- Database: AWS RDS PostgreSQL stores raw data, features, and predictions.
-- Containerization: Docker images for the API and jobs. Images are pushed to GitHub Container Registry.
-- CI: GitHub Actions run scheduled workflows to refresh weather so predictions stay current.
-- Deployment folder: Dockerfiles and scripts live under deployment/.
 
-![Infrastructure](https://i.ibb.co/qMXN923M/Intrastructure.png)
+* Compute: AWS EC2 free tier for batch and maintenance jobs.
+* Database: AWS RDS PostgreSQL stores raw data, features, and predictions.
+* Containerization: Docker images for the API and jobs. Images are pushed to GitHub Container Registry.
+* CI: GitHub Actions run scheduled workflows to refresh weather so predictions stay current.
+* Deployment folder: Dockerfiles and scripts live under deployment/.
+
+<p align="center">
+  <img src="dhttps://i.ibb.co/qMXN923M/Intrastructure.png" alt="Infrastructure" width="900"/>
+</p>
 
 Online prediction loop
-1) Load live inputs from PostgreSQL.  
-2) Send features to the HF Spaces FastAPI endpoint for inference.  
-3) Write predictions back to PostgreSQL.  
-4) The web app reads predictions and renders them with Leaflet and JavaScript. The site is deployed on Render.com as a static app.
+
+1. Load live inputs from PostgreSQL.
+2. Send features to the HF Spaces FastAPI endpoint for inference.
+3. Write predictions back to PostgreSQL.
+4. The web app reads predictions and renders them with Leaflet and JavaScript. The site is deployed on Render.com as a static app.
 
 ---
 
-## Reports and figures
+<a id="reports-and-figures"></a>
+
+## 🖼️ Reports and figures
 
 Place figures in docs/ and reference them here. MLflow also logs these as artifacts during training.
-- ROC curve: docs/roc_curve.png  
-- Confusion matrix: docs/confusion_matrix.png  
-- Infrastructure overview: docs/infra_overview.png
+
+* ROC curve: docs/roc_curve.png
+* Confusion matrix: docs/confusion_matrix.png
+* Infrastructure overview: docs/infra_overview.png
+* H3 overlay: docs/h3.png
 
 ---
 
-## Cost choices
+<a id="cost-choices"></a>
+
+## 💸 Cost choices
 
 Goal is to keep hosting cost minimal.
-- EC2 and RDS on free tier where possible
-- Hugging Face Spaces free tier for the API app
-- Render.com free tier for static web hosting
-- GitHub Actions for scheduled data refresh and GHCR for image storage
+
+* EC2 and RDS on free tier where possible
+* Hugging Face Spaces free tier for the API app
+* Render.com free tier for static web hosting
+* GitHub Actions for scheduled data refresh and GHCR for image storage
 
 ---
 
-## Limitations
+<a id="limitations"></a>
 
-- OSM data completeness  
+## ⚠️ Limitations
+
+* OSM data completeness
   OpenStreetMap can be incomplete or inconsistent in some areas and times. Missing tags, sparse mapping activity, and delayed edits can reduce feature quality. The pipeline uses historical snapshots to stay time correct, but gaps in OSM coverage remain a source of noise.
-- Reporting effects  
+* Reporting effects
   Collision data depends on reporting and may miss minor incidents.
-- Exposure not explicit  
+* Exposure not explicit
   Traffic volumes and pedestrian or cyclist flows are not modeled directly. This can bias risk in locations with high exposure.
-- Temporal drift  
+* Temporal drift
   Network changes and policy interventions can shift risk over time. Regular retraining and drift monitoring are recommended.
 
 ---
 
-## Future work and use cases
+<a id="future-work-and-use-cases"></a>
 
-- Routing for safety  
+## 🔭 Future work and use cases
+
+* Routing for safety
   Build a routing app that selects the safest path given origin, destination, and time.
-- Infrastructure planning  
+* Infrastructure planning
   Support councils and planners with risk maps for targeted interventions such as crossings, speed cameras, and traffic calming.
-- Traffic monitoring  
+* Traffic monitoring
   Combine live feeds and streaming weather to produce updated risk scores for operational dashboards.
-- Better exposure modeling  
+* Better exposure modeling
   Integrate traffic counts, mobile location data, and pedestrian or cycling volumes.
-- Calibration at scale  
+* Calibration at scale
   Apply isotonic or Platt scaling per borough or road class and monitor drift.
-- Uncertainty estimates  
+* Uncertainty estimates
   Add conformal prediction intervals to report risk bounds.
-- Spatial validation  
+* Spatial validation
   Formalize spatial cross validation folds by borough or by H3 partitions.
-- Interpretability  
+* Interpretability
   Provide SHAP summaries and partial dependence plots per borough and road class.
 
 ---
 
-## Getting started
+<a id="getting-started"></a>
+
+## 🧰 Getting started
 
 Prerequisites
-- Python 3.10 or newer
-- PostgreSQL 14 or newer
-- Docker for building images if you want to run the API locally
-- An AWS account if you plan to mirror the infra
-- Optional CUDA for GPU training
+
+* Python 3.10 or newer
+* PostgreSQL 14 or newer
+* Docker for building images if you want to run the API locally
+* An AWS account if you plan to mirror the infra
+* Optional CUDA for GPU training
 
 Environment variables
-```yml  
+
+```yml
 Create a .env file with at least:
 - POSTGRES_HOST
 - POSTGRES_PORT
@@ -388,6 +435,7 @@ Create a .env file with at least:
 ```
 
 Install
+
 ```bash
 - git clone https://github.com/Aman-Khokhar18/safe-roads.git  
 - cd safe-roads  
@@ -396,6 +444,7 @@ Install
 ```
 
 Data load outline
+
 ```bash
 - Ingest TfL CSVs to Postgres via Prefect flows  
   python src/safe_roads/flows/ingest_collisiondata.py --years 2015 2024 --h3-res 11  
@@ -409,6 +458,7 @@ Data load outline
 ```
 
 Serve locally with Docker
+
 ```bash
 - Build  
   docker build -f deployment/Dockerfile.api -t saferoads-api .
@@ -418,33 +468,41 @@ Serve locally with Docker
   curl -X POST http://localhost:7860/predict -H "Content-Type: application/json" -d '{"h3":"8928308280fffff","timestamp":"2024-06-01T08:00:00Z"}'  
   The exact payload shape depends on the API app. See the FastAPI code for the latest schema.
 ```
----
-
-## Architecture
-
-High level flow
-- TfL collisions 2015 to 2024
-  - convert easting and northing to lat and lon
-  - index to H3 cells
-- ohsome OSM history
-  - aggregate features per H3 and per time
-- Meteostat weather
-  - join hourly conditions
-- Feature join on H3 plus time
-- Train XGBoost
-- Push model artifacts to Hugging Face
-- Serve with FastAPI on Hugging Face Spaces
-- Batch jobs on EC2 build live features and call the API
-- Predictions stored in RDS PostgreSQL
-- Leaflet map on Render.com reads predictions for the public site
 
 ---
 
-## Acknowledgements
+<a id="architecture"></a>
 
-- Transport for London for collision data
-- OpenStreetMap contributors and the ohsome API
-- Meteostat for historical weather
-- H3 by Uber Engineering
-- XGBoost, MLflow, Hyperopt, Prefect, Leaflet, FastAPI, Docker, and the broader open source community
-- kim <3
+## 🏗️ Architecture
+
+**High‑level flow.** Collisions are converted to lat/lon, indexed to H3, and combined with time‑correct OSM history and Meteostat weather in Postgres. The curated **(hex, time)** dataset feeds XGBoost; model artifacts are published to Hugging Face and served via a FastAPI Space. Batch jobs on EC2 build live features and call the API; predictions are written back to RDS and rendered by the Leaflet front‑end on Render.com.
+
+```mermaid
+flowchart LR
+  A[TfL collisions (2015–2024)] -->|BNG → lat/lon; H3 index| B[(PostgreSQL / RDS)]
+  C[ohsome (historical OSM)] -->|per‑hex, time‑correct features| B
+  D[Meteostat weather] -->|hourly joins| B
+  B --> E[Feature join (H3 + time)]
+  E --> F[XGBoost training]
+  F --> G[Model artifacts (Hugging Face)]
+  G --> H[FastAPI on HF Spaces]
+  H --> I[(Predictions in RDS)]
+  I --> J[Leaflet web app (Render.com)]
+```
+
+<p align="center">
+  <img src="https://i.ibb.co/mVVkTQJn/diagram-export-30-10-2025-19-38-35-1.png" alt="Infrastructure overview" width="900"/>
+</p>
+
+---
+
+<a id="acknowledgements"></a>
+
+## 🙌 Acknowledgements
+
+* Transport for London for collision data
+* OpenStreetMap contributors and the ohsome API
+* Meteostat for historical weather
+* H3 by Uber Engineering
+* XGBoost, MLflow, Hyperopt, Prefect, Leaflet, FastAPI, Docker, and the broader open source community
+* kim <3
