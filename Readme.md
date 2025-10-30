@@ -11,7 +11,16 @@ Predict the probability of a road collision at any location and time in Greater 
 ---
 
 <p align="center">
-  <img src="https://pouch.jumpshare.com/preview/r4gnfsAuzVG1KmeXpiiofCjBJtfWhGDVDFDwck5A0Wn0twPCH0RJv1fyrDEisqeSiZb85cHQH2kyR2s6F8z0eT0NrL4qcEtP0zpj-Ewfwug" alt="Safe Roads London demo" width="900"/>
+  <video
+    src="https://github.com/user-attachments/assets/249341e8-afda-49b6-823d-25f337a667f2"
+    controls
+    muted
+    loop
+    playsinline
+    width="900"
+    style="max-width:100%;height:auto;">
+    <a href="https://github.com/user-attachments/assets/249341e8-afda-49b6-823d-25f337a667f2">Watch the demo video</a>
+  </video>
 </p>
 
 <a id="table-of-contents"></a>
@@ -103,7 +112,7 @@ Why H3 helps:
   Hex bins support counts, shares, means, and graph summaries. This reduces noise and lets the model learn from area level patterns instead of only raw points.
 
 <p align="center">
-  <img src="https://i.ibb.co/WWw3Phvc/h3-hex-explain.png" alt="H3 hex overlay with sample collisions" width="820"/>
+  <img src="https://github.com/user-attachments/assets/78125c22-148d-4c61-b499-6b38170c0636" alt="H3 hex overlay with sample collisions" width="820"/>
 </p>
 
 ---
@@ -237,11 +246,11 @@ Training script path:
 | Brier Skill Score |   0.7920958585742299 |
 
 <p align="center">
-  <img src="https://i.ibb.co/B5p2tNkG/confusion-matrix.png" alt="Confusion Matrix" width="620"/>
+  <img src="https://github.com/user-attachments/assets/a8150f51-4978-4d7c-a536-2c53a5f2efaf" alt="Confusion Matrix" width="620"/>
 </p>
 
 <p align="center">
-  <img src="https://i.ibb.co/vxfFbB2q/roc-curve.png" alt="ROC Curve" width="620"/>
+  <img src="https://github.com/user-attachments/assets/50abcf89-e8bd-4888-9ca7-6dbcfb798f5b" alt="ROC Curve" width="620"/>
 </p>
 
 Interpretation:
@@ -333,7 +342,7 @@ Infra and packaging
 * Deployment folder: Dockerfiles and scripts live under deployment/.
 
 <p align="center">
-  <img src="dhttps://i.ibb.co/qMXN923M/Intrastructure.png" alt="Infrastructure" width="900"/>
+  <img src="https://github.com/user-attachments/assets/e6b88fce-a64e-4654-93ef-62fc9cc5ddde" alt="Infrastructure" width="900"/>
 </p>
 
 Online prediction loop
@@ -478,7 +487,7 @@ Serve locally with Docker
 
 
 <p align="center">
-  <img src="https://i.ibb.co/mVVkTQJn/diagram-export-30-10-2025-19-38-35-1.png" alt="Infrastructure overview" width="900"/>
+  <img src="https://github.com/user-attachments/assets/961702b5-d961-4244-b5aa-c0a7c193bce3" alt="Infrastructure overview" width="900"/>
 </p>
 
 ---
