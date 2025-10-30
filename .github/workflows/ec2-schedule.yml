@@ -103,3 +103,11 @@ jobs:
         shell: bash
         run: |
           rm -f key.pem app.env
+
+      - name: Stop EC2 to save costs
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws ec2 stop-instances --instance-ids "$INSTANCE_ID" >/dev/null
+          aws ec2 wait instance-stopped --instance-ids "$INSTANCE_ID"
