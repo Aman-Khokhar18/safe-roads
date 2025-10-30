@@ -1,4 +1,3 @@
-# src/safe_roads/query/deploy/__init__.py
 from importlib.resources import files
 import sqlparse
 from sqlalchemy import create_engine, text
