@@ -193,18 +193,6 @@ Why H3 helps:
 
 ---
 
-<a id="architecture"></a>
-
-## 🏗️ Architecture
-
-**High‑level flow.** Collisions are converted to lat/lon, indexed to H3, and combined with time‑correct OSM history and Meteostat weather in Postgres. The curated **(hex, time)** dataset feeds XGBoost; model artifacts are published to Hugging Face and served via a FastAPI Space. Batch jobs on EC2 build live features and call the API; predictions are written back to RDS and rendered by the Leaflet front‑end on Render.com.
-
-
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/961702b5-d961-4244-b5aa-c0a7c193bce3" alt="Infrastructure overview" width="900"/>
-</p>
-
----
 
 <a id="modeling"></a>
 
@@ -367,16 +355,16 @@ Online prediction loop
 
 ---
 
-<a id="reports-and-figures"></a>
+<a id="architecture"></a>
 
-## 🖼️ Reports and figures
+## 🏗️ Architecture
 
-Place figures in docs/ and reference them here. MLflow also logs these as artifacts during training.
+**High‑level flow.** Collisions are converted to lat/lon, indexed to H3, and combined with time‑correct OSM history and Meteostat weather in Postgres. The curated **(hex, time)** dataset feeds XGBoost; model artifacts are published to Hugging Face and served via a FastAPI Space. Batch jobs on EC2 build live features and call the API; predictions are written back to RDS and rendered by the Leaflet front‑end on Render.com.
 
-* ROC curve: docs/roc_curve.png
-* Confusion matrix: docs/confusion_matrix.png
-* Infrastructure overview: docs/infra_overview.png
-* H3 overlay: docs/h3.png
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/961702b5-d961-4244-b5aa-c0a7c193bce3" alt="Infrastructure overview" width="900"/>
+</p>
 
 ---
 
