@@ -33,7 +33,6 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Ensure EC2 is running + get host
       - name: Ensure EC2 is running + get host (wait for SSH)
         id: ec2
         shell: bash
@@ -93,7 +92,6 @@ jobs:
           # Presence check without printing the secret
           grep -n '^G_TOKEN=' app.env >/dev/null || { echo "G_TOKEN missing in app.env"; exit 1; }
 
-      - name: Copy app.env to EC2
       - name: Copy app.env to EC2 (with keepalives)
         env:
           EC2_HOST: ${{ steps.ec2.outputs.host }}
