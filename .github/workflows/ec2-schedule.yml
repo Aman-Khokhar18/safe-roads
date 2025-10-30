@@ -3,7 +3,6 @@ name: Run GHCR image on EC2 (4h)
 
 on:
   schedule:
-    - cron: "0 */2 * * *"   # every 2 hours (UTC)
     - cron: "0 */6 * * *"   # every 2 hours (UTC)
   workflow_dispatch:
 
@@ -80,7 +79,6 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          cat > app.env <<EOF
           cat > app.env <<'EOF'
           DATABASE_URL=${{ secrets.DATABASE_URL }}
           SAFE_ROADS_API=${{ secrets.SAFE_ROADS_API }}
@@ -97,16 +95,6 @@ jobs:
           EC2_HOST: ${{ steps.ec2.outputs.host }}
         shell: bash
         run: |
-          set -euo pipefail
-          scp -o StrictHostKeyChecking=no -i key.pem app.env "$EC2_USER@${EC2_HOST}:~/app.env"
-
-      - name: SSH and run container
-        env:
-          EC2_HOST: ${{ steps.ec2.outputs.host }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          ssh -o StrictHostKeyChecking=no -i key.pem "$EC2_USER@${EC2_HOST}" bash -s <<EOF
           set -euo pipefail
           SSH_OPTS="-o StrictHostKeyChecking=no -o IdentitiesOnly=yes \
             -o ServerAliveInterval=15 -o ServerAliveCountMax=60 \
@@ -141,11 +129,6 @@ jobs:
           test -f "\$ENV_FILE"
           grep -n '^G_TOKEN=' "\$ENV_FILE" >/dev/null || { echo "G_TOKEN missing in env file"; exit 1; }
 
-          sudo docker pull "${CONTAINER_IMAGE}"
-          sudo docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
-          sudo docker run --rm --name "${CONTAINER_NAME}" \
-            --env-file "\$ENV_FILE" \
-            "${CONTAINER_IMAGE}"
           # Ensure Docker exists and is running (Ubuntu/Debian & Amazon Linux 2)
           if ! command -v docker >/dev/null 2>&1; then
             if [ -f /etc/os-release ] && grep -qi ubuntu /etc/os-release; then
