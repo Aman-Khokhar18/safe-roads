@@ -79,11 +79,6 @@ Predict the probability of a road collision at any location and time in Greater 
 3. Weather
    Meteostat for historical hourly and daily weather aligned to each record.
 
-### Storage
-
-* All raw and processed tables live in PostgreSQL on AWS RDS.
-* The ETL normalizes schema, converts coordinates, assigns H3, and records provenance.
-
 ---
 
 <a id="why-h3-and-how-it-is-used"></a>
