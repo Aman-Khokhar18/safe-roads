@@ -1,8 +1,16 @@
+<<<<<<< HEAD
+=======
+# .github/workflows/ec2-schedule.yml
+>>>>>>> bdc974da32baf8471c9d68d933221161ea09ed7a
 name: Run GHCR image on EC2 (4h)
 
 on:
   schedule:
+<<<<<<< HEAD
     - cron: "0 */2 * * *"   # every 2 hours (UTC)
+=======
+    - cron: "0 */6 * * *"   # every 2 hours (UTC)
+>>>>>>> bdc974da32baf8471c9d68d933221161ea09ed7a
   workflow_dispatch:
 
 concurrency:
@@ -12,6 +20,10 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
+<<<<<<< HEAD
+=======
+    timeout-minutes: 360
+>>>>>>> bdc974da32baf8471c9d68d933221161ea09ed7a
     permissions:
       id-token: write
       contents: read
@@ -30,7 +42,11 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
 
+<<<<<<< HEAD
       - name: Ensure EC2 is running + get host
+=======
+      - name: Ensure EC2 is running + get host (wait for SSH)
+>>>>>>> bdc974da32baf8471c9d68d933221161ea09ed7a
         id: ec2
         shell: bash
         run: |
@@ -40,10 +56,33 @@ jobs:
             aws ec2 start-instances --instance-ids "$INSTANCE_ID" >/dev/null
             aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
           fi
+<<<<<<< HEAD
+=======
+
+          # Wait for both AWS status checks to pass
+          aws ec2 wait instance-status-ok --instance-ids "$INSTANCE_ID"
+
+>>>>>>> bdc974da32baf8471c9d68d933221161ea09ed7a
           HOST=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query 'Reservations[0].Instances[0].PublicDnsName' --output text)
           if [ -z "$HOST" ] || [ "$HOST" = "None" ]; then
             HOST=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
           fi
+<<<<<<< HEAD
+=======
+
+          # Wait for SSH port to be open
+          READY=0
+          for i in {1..30}; do
+            if timeout 3 bash -c ">/dev/tcp/$HOST/22" 2>/dev/null; then
+              READY=1
+              break
+            fi
+            sleep 5
+          done
+          if [ "$READY" -ne 1 ]; then
+            echo "SSH port 22 not reachable on $HOST"; exit 1
+          fi
+>>>>>>> bdc974da32baf8471c9d68d933221161ea09ed7a
           echo "host=$HOST" >> "$GITHUB_OUTPUT"
 
       - name: Write SSH key
@@ -60,7 +99,11 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
+<<<<<<< HEAD
           cat > app.env <<EOF
+=======
+          cat > app.env <<'EOF'
+>>>>>>> bdc974da32baf8471c9d68d933221161ea09ed7a
           DATABASE_URL=${{ secrets.DATABASE_URL }}
           SAFE_ROADS_API=${{ secrets.SAFE_ROADS_API }}
           HTTP_TIMEOUT=30
@@ -71,12 +114,17 @@ jobs:
           # Presence check without printing the secret
           grep -n '^G_TOKEN=' app.env >/dev/null || { echo "G_TOKEN missing in app.env"; exit 1; }
 
+<<<<<<< HEAD
       - name: Copy app.env to EC2
+=======
+      - name: Copy app.env to EC2 (with keepalives)
+>>>>>>> bdc974da32baf8471c9d68d933221161ea09ed7a
         env:
           EC2_HOST: ${{ steps.ec2.outputs.host }}
         shell: bash
         run: |
           set -euo pipefail
+<<<<<<< HEAD
           scp -o StrictHostKeyChecking=no -i key.pem app.env "$EC2_USER@${EC2_HOST}:~/app.env"
 
       - name: SSH and run container
@@ -87,15 +135,105 @@ jobs:
           set -euo pipefail
           ssh -o StrictHostKeyChecking=no -i key.pem "$EC2_USER@${EC2_HOST}" bash -s <<EOF
           set -euo pipefail
+=======
+          SSH_OPTS="-o StrictHostKeyChecking=no -o IdentitiesOnly=yes \
+            -o ServerAliveInterval=15 -o ServerAliveCountMax=60 \
+            -o TCPKeepAlive=yes -o ConnectionAttempts=30 -o ConnectTimeout=10 \
+            -i key.pem"
+          ok=0
+          for i in {1..5}; do
+            if scp $SSH_OPTS app.env "$EC2_USER@${EC2_HOST}:~/app.env"; then
+              ok=1; break
+            fi
+            sleep 5
+          done
+          if [ "$ok" -ne 1 ]; then
+            echo "Failed to scp app.env to $EC2_HOST after retries"; exit 1
+          fi
+
+      - name: SSH and run container (detached, with OOM diagnostics)
+        env:
+          EC2_HOST: ${{ steps.ec2.outputs.host }}
+          CONTAINER_MEM: ${{ secrets.CONTAINER_MEM }}   # optional, e.g. "3g"
+        shell: bash
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-o StrictHostKeyChecking=no -o IdentitiesOnly=yes \
+            -o ServerAliveInterval=15 -o ServerAliveCountMax=60 \
+            -o TCPKeepAlive=yes -o ConnectionAttempts=30 -o ConnectTimeout=10 \
+            -i key.pem"
+          ssh $SSH_OPTS "$EC2_USER@${EC2_HOST}" bash -se <<EOF
+          set -euo pipefail
+
+>>>>>>> bdc974da32baf8471c9d68d933221161ea09ed7a
           ENV_FILE="\$HOME/app.env"
           test -f "\$ENV_FILE"
           grep -n '^G_TOKEN=' "\$ENV_FILE" >/dev/null || { echo "G_TOKEN missing in env file"; exit 1; }
 
+<<<<<<< HEAD
           sudo docker pull "${CONTAINER_IMAGE}"
           sudo docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
           sudo docker run --rm --name "${CONTAINER_NAME}" \
             --env-file "\$ENV_FILE" \
             "${CONTAINER_IMAGE}"
+=======
+          # Ensure Docker exists and is running (Ubuntu/Debian & Amazon Linux 2)
+          if ! command -v docker >/dev/null 2>&1; then
+            if [ -f /etc/os-release ] && grep -qi ubuntu /etc/os-release; then
+              sudo apt-get update -y
+              sudo apt-get install -y docker.io
+            else
+              # Amazon Linux 2 / RHEL family
+              sudo amazon-linux-extras install -y docker || sudo yum install -y docker || sudo dnf install -y docker
+            fi
+          fi
+          sudo systemctl enable --now docker || true
+          sudo docker version || { echo "Docker not ready"; exit 1; }
+
+          # Pull latest image
+          sudo docker pull "${CONTAINER_IMAGE}"
+
+          # Stop any previous container
+          sudo docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+
+          # Optional memory cap if provided (e.g. 3g). This line is locally expanded by Actions:
+          CONTAINER_MEM_VAL="${CONTAINER_MEM}"
+          RUN_MEM_ARGS=()
+          if [ -n "\$CONTAINER_MEM_VAL" ]; then
+            RUN_MEM_ARGS+=(--memory "\$CONTAINER_MEM_VAL" --memory-swap "\$CONTAINER_MEM_VAL")
+          fi
+
+          # Run detached so we can stream logs and still get exit code
+          CID=\$(sudo docker run -d --name "${CONTAINER_NAME}" \
+            --env-file "\$ENV_FILE" \
+            "\${RUN_MEM_ARGS[@]}" \
+            "${CONTAINER_IMAGE}")
+          echo "Container ID: \$CID"
+
+          # Stream logs until exit, capture status
+          set +e
+          sudo docker logs -f "\$CID" &
+          LOGSPID=\$!
+          sudo docker wait "\$CID"
+          WAIT_STATUS=\$?
+          kill \$LOGSPID 2>/dev/null || true
+          set -e
+
+          # Inspect termination details
+          OOM=\$(sudo docker inspect -f '{{.State.OOMKilled}}' "\$CID")
+          EXIT=\$(sudo docker inspect -f '{{.State.ExitCode}}' "\$CID")
+          FINISHED=\$(sudo docker inspect -f '{{.State.FinishedAt}}' "\$CID")
+          echo "Container finished at \$FINISHED with exit \$EXIT (OOMKilled=\$OOM)"
+
+          echo "==== Recent kernel messages (OOM?) ===="
+          journalctl -k --since "-1h" | egrep -i 'oom|out of memory' || echo "No OOM messages in last hour."
+
+          # Fail the job if the container failed
+          if [ "\$EXIT" -ne 0 ]; then
+            echo "Container exit code: \$EXIT"
+            exit \$EXIT
+          fi
+>>>>>>> bdc974da32baf8471c9d68d933221161ea09ed7a
           EOF
 
       - name: Cleanup local artifacts
@@ -103,6 +241,7 @@ jobs:
         shell: bash
         run: |
           rm -f key.pem app.env
+<<<<<<< HEAD
 
       - name: Stop EC2 to save costs
         if: always()
@@ -111,3 +250,5 @@ jobs:
           set -euo pipefail
           aws ec2 stop-instances --instance-ids "$INSTANCE_ID" >/dev/null
           aws ec2 wait instance-stopped --instance-ids "$INSTANCE_ID"
+=======
+>>>>>>> bdc974da32baf8471c9d68d933221161ea09ed7a
