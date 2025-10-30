@@ -430,11 +430,7 @@ Environment variables
 
 ```yml
 Create a .env file with at least:
-- POSTGRES_HOST
-- POSTGRES_PORT
-- POSTGRES_DB
-- POSTGRES_USER
-- POSTGRES_PASSWORD
+- POSTGRESDB_URL
 - HF_TOKEN (optional if any private repos or endpoints are used)
 ```
 
