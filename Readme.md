@@ -12,7 +12,6 @@ Predict the probability of a road collision at any location and time in Greater 
 
 <p align="center">
   <img src="https://pouch.jumpshare.com/preview/r4gnfsAuzVG1KmeXpiiofCjBJtfWhGDVDFDwck5A0Wn0twPCH0RJv1fyrDEisqeSiZb85cHQH2kyR2s6F8z0eT0NrL4qcEtP0zpj-Ewfwug" alt="Safe Roads London demo" width="900"/>
-  <br><em>Add <code>docs/demo.gif</code> (screen capture of the map, time slider, borough filter, and tooltip) to display the live demo here.</em>
 </p>
 
 <a id="table-of-contents"></a>
@@ -477,18 +476,6 @@ Serve locally with Docker
 
 **High‑level flow.** Collisions are converted to lat/lon, indexed to H3, and combined with time‑correct OSM history and Meteostat weather in Postgres. The curated **(hex, time)** dataset feeds XGBoost; model artifacts are published to Hugging Face and served via a FastAPI Space. Batch jobs on EC2 build live features and call the API; predictions are written back to RDS and rendered by the Leaflet front‑end on Render.com.
 
-```mermaid
-flowchart LR
-  A[TfL collisions (2015–2024)] -->|BNG → lat/lon; H3 index| B[(PostgreSQL / RDS)]
-  C[ohsome (historical OSM)] -->|per‑hex, time‑correct features| B
-  D[Meteostat weather] -->|hourly joins| B
-  B --> E[Feature join (H3 + time)]
-  E --> F[XGBoost training]
-  F --> G[Model artifacts (Hugging Face)]
-  G --> H[FastAPI on HF Spaces]
-  H --> I[(Predictions in RDS)]
-  I --> J[Leaflet web app (Render.com)]
-```
 
 <p align="center">
   <img src="https://i.ibb.co/mVVkTQJn/diagram-export-30-10-2025-19-38-35-1.png" alt="Infrastructure overview" width="900"/>
