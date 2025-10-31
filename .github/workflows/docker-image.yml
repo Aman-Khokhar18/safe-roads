@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Optional extra image tag (lowercase, no spaces/slashes)"
+        description: "Optional extra image tag"
         required: false
         default: ""
 
