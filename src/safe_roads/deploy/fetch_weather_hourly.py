@@ -2,9 +2,10 @@ from datetime import datetime, timedelta
 import logging
 import pandas as pd
 from meteostat import Hourly, Point
+from sqlalchemy import text, create_engine
 
 from safe_roads.utils.config import get_pg_url
-from safe_roads.utils.data import df_to_pg
+from safe_roads.utils.data import df_to_pg, _table_exists
 
 logger = logging.getLogger("safe_roads.weather")
 if not logger.handlers:
@@ -52,26 +53,27 @@ def fetch_hourly_weather(lat: float, lon: float, area_label: str = "Greater Lond
     return df
 
 
-def write_to_postgis(df: pd.DataFrame, db_url: str, table_name: str = TABLE_NAME, if_exists: str = "replace") -> None:
-    """Write dataframe to PostGIS."""
+def write_to_postgis(df: pd.DataFrame, db_url: str, table_name: str) :
+
     if df is None or df.empty:
-        logger.warning("No data to load; skipping write.")
-        return
+        return  # nothing to do
 
-    try:
-        df_to_pg(df, table_name, db_url, if_exists=if_exists)
-        logger.info("Loaded %d rows into %s (if_exists='%s').", len(df), table_name, if_exists)
-    except Exception as e:
-        logger.exception("Failed to write to PostGIS: %s", e)
-
+    engine = create_engine(db_url)
+    with engine.begin() as conn:
+        conn.execute(text(f"DROP TABLE IF EXISTS {table_name} CASCADE"))
+        df.to_sql(
+            name=table_name,
+            con=conn,
+            if_exists="replace",
+            index=False,
+        )
 
 def get_hourly_weather() -> None:
-    """End-to-end: fetch and write the latest hourly weather for Greater London."""
     logger.info("Starting current hourly weather ingestion for Greater London")
 
     db_url = get_pg_url()
     df = fetch_hourly_weather(LAT, LON)
-    write_to_postgis(df, db_url, table_name=TABLE_NAME, if_exists="replace")
+    write_to_postgis(df, db_url, table_name=TABLE_NAME)
 
     logger.info("Weather ingestion complete")
 

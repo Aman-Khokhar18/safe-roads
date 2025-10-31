@@ -17,11 +17,8 @@ def transform_data() -> None:
 
     logger.info("Running SQL queries")
     if _table_exists(url=url, table="osm_deploy_latest"):
-        run_sql(url, "add_weather_live.sql")
+        run_sql(url, "add_latest_weather.sql")
         logger.info("Added live weather data")
-
-        run_sql(url, "cyclic_time_features.sql")
-        logger.info("Created time features")
     else:
         msg = "OSM latest data table not found in database"
         logger.error(msg)

@@ -13,7 +13,7 @@ def data_loader(table, chunksize: int | None = None, mode: str | None = None):
 
     url = get_pg_url()
     engine = create_engine(url, pool_pre_ping=True)
-    order_by = "h3, year, dt_month, dt_day, dt_hour"
+    order_by = "h3, dt_year, dt_month, dt_day, dt_hour"
 
     collision_target = ",cd.collision AS collision_target" if mode == "train" else ""
 
