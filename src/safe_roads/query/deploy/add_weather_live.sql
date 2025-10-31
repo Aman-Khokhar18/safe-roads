@@ -1,4 +1,3 @@
--- new table with live weather added to every row
 DROP TABLE IF EXISTS public.osm_deploy_latest_w;
 CREATE TABLE public.osm_deploy_latest_w AS
 SELECT

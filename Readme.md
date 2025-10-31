@@ -338,7 +338,7 @@ Infra and packaging
 * Deployment folder: Dockerfiles and scripts live under deployment/.
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/e6b88fce-a64e-4654-93ef-62fc9cc5ddde" alt="Infrastructure" width="900"/>
+  <img src="https://github.com/user-attachments/assets/556b8a2c-d7c6-4937-b4a7-aa67a43f311a" alt="Infrastructure" width="900"/>
 </p>
 
 Online prediction loop
