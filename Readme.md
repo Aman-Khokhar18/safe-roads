@@ -2,7 +2,7 @@
 
 Predict the probability of a road collision at any location and time in Greater London by combining ten years of Transport for London collision records with OpenStreetMap history and historical weather. This repository covers data collection, H3 based feature engineering, model training with XGBoost, experiment tracking, and end to end deployment.
 
-* Live demo: [https://safe-roads-london.onrender.com/](https://safe-roads-london.onrender.com/)
+* Live demo: [https://safe-roads-london.onrender.com/](https://safe-roads-london.site/)
 * Model repo: [https://huggingface.co/AmanKhokhar/safe-roads/tree/main](https://huggingface.co/AmanKhokhar/safe-roads/tree/main)
 * API on Hugging Face Spaces: [https://huggingface.co/spaces/AmanKhokhar/safe-roads-catboost](https://huggingface.co/spaces/AmanKhokhar/safe-roads-catboost)  (the name still says catboost from early experiments; the final model uses XGBoost)
 * Web app repo: [https://github.com/Aman-Khokhar18/safe-roads-london](https://github.com/Aman-Khokhar18/safe-roads-london)
