@@ -2,7 +2,7 @@ name: Deploy image to EC2
 
 on:
   schedule:
-    - cron: "0 */2 * * *"   # every 2 hours (UTC)
+    - cron: "0 */24 * * *"   # every 2 hours (UTC)
   workflow_dispatch:
 
 concurrency:
